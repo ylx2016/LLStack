@@ -116,7 +116,7 @@ runInstall(){
   echo "1) Adminer"
   echo "2) phpMyAdmin"
   echo "0) Not need"
-  read -p 'DB tool [1-3]: ' -r -e -i 0 dbV
+  read -p 'DB tool [1-3]: ' -r -e -i 2 dbV
   if [ "${dbV}" = '' ]; then
     showError 'Invalid DB tool version'
     exit
@@ -125,7 +125,7 @@ runInstall(){
   showNotice "(Step 7/7) Use a mirror server to download rpms"
   echo "1) Source station"
   echo "2) China Mirror station"
-  read -p 'Proxy server [1-2]: ' -r -e -i 2 freeV
+  read -p 'Proxy server [1-2]: ' -r -e -i 1 freeV
   if [ "${freeV}" = '' ]; then
     showError 'Invalid Proxy server'
     exit
@@ -299,7 +299,7 @@ runInstall(){
   if [ "${LiteSpeedV}" != '0' ]; then
     systemctl stop httpd.service  
     yum remove httpd appnode-php72-php -y
-    rpm -Uvh ${LiteSpeedRepoUrl}/centos/litespeed-repo-1.1-1.el7.noarch.rpm
+    rpm -Uvh ${LiteSpeedRepoUrl}/centos/litespeed-repo-1.2-1.el7.noarch.rpm
 
     LiteSpeedRepo=/etc/yum.repos.d/litespeed.repo
 
@@ -331,7 +331,7 @@ runInstall(){
 
   if [ "${LiteSpeedV}" != '0' ]; then
 
-    yum install lsws -y
+    yum install openlitespeed -y
 
     if [ -d "/usr/local/lsws/" ]; then
       mv -bfu /usr/local/lsws/conf/httpd_config.xml /usr/local/lsws/conf/httpd_config.xml.llstack.bak
@@ -409,17 +409,17 @@ runInstall(){
       ## PHP 5.5-7.0 仅 PMA 4.8 LTS 支持
       elif [ "${phpV}}" = "2" || "${phpV}" = "3" || "${phpV}" = "4" ]; then
         cd /home/demo/public_html
-        wget https://files.phpmyadmin.net/phpMyAdmin/4.8.5/phpMyAdmin-4.8.5-all-languages.zip
-        unzip phpMyAdmin-4.8.5-all-languages.zip
-        rm -rf phpMyAdmin-4.8.5-all-languages.zip
-        mv phpMyAdmin-4.8.5-all-languages phpMyAdmin
+        wget https://files.phpmyadmin.net/phpMyAdmin/4.9.7/phpMyAdmin-4.9.7-all-languages.zip
+        unzip phpMyAdmin-4.9.7-all-languages.zip
+        rm -rf phpMyAdmin-4.9.7-all-languages.zip
+        mv phpMyAdmin-4.9.7-all-languages phpMyAdmin
       ## PHP 7.1+ 支持 4.8，5.0+
       else
         cd /home/demo/public_html
-        wget https://files.phpmyadmin.net/phpMyAdmin/4.8.5/phpMyAdmin-4.8.5-all-languages.zip
-        unzip phpMyAdmin-4.8.5-all-languages.zip
-        rm -rf phpMyAdmin-4.8.5-all-languages.zip
-        mv phpMyAdmin-4.8.5-all-languages phpMyAdmin
+        wget https://files.phpmyadmin.net/phpMyAdmin/4.9.7/phpMyAdmin-4.9.7-all-languages.zip
+        unzip phpMyAdmin-4.9.7-all-languages.zip
+        rm -rf phpMyAdmin-4.9.7-all-languages.zip
+        mv phpMyAdmin-4.9.7-all-languages phpMyAdmin
       fi
     fi
   fi
