@@ -55,7 +55,7 @@ LLStack 轻量版脚本只提供 LiteSpeed 的图形化面板，其他 PHP、MyS
 **安装脚本：**
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ivmm/LLStack/master/install.sh)" 2>&1 | tee llstack-all.log
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ylx2016/LLStack/master/install.sh)" 2>&1 | tee llstack-all.log
 ```
 
 [轻量版详细教程 →](https://www.llstack.com/zh/Lite/)
@@ -69,7 +69,7 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/ivmm/LLStack/master/instal
 ```bash
 INSTALL_AGENT=1 INIT_SWAPFILE=1 INSTALL_PKGS='php73' bash -c "$(curl -sS http://dl.appnode.com/install.sh)"
 yum install appnode-app-mysqld appnode-app-php
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ivmm/LLStack/master/install-appnode.sh)" 2>&1 | tee llstack-all.log
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/ylx2016/LLStack/master/install-appnode.sh)" 2>&1 | tee llstack-all.log
 ```
 
 [面板版详细教程 →](https://www.llstack.com/zh/panel/)
