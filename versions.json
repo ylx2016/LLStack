@@ -1,6 +1,6 @@
 {
-  "stable_version": "0.8.7",
-  "dev_version": "0.8.7",
+  "stable_version": "0.8.8",
+  "dev_version": "0.8.8",
   "min_upgrade_version": "0.5.0",
   "changelog_url": "https://github.com/web-casa/LLStack/releases"
 }

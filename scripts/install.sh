@@ -240,7 +240,8 @@ setup_ssl_cron() {
     local ssl_cmd="0 3 * * * $LLSTACK_DIR/scripts/ssl/ssl-check-renew.sh >> /var/log/llstack-ssl-renew.log 2>&1"
     local db_cmd="30 2 * * * $LLSTACK_DIR/scripts/backup/backup-panel-db.sh >> /var/log/llstack-panel-backup.log 2>&1"
     local wp_cmd="*/30 * * * * $LLSTACK_DIR/scripts/wordpress/wp-auto-update-check.sh 2>&1"
-    ( (crontab -l 2>/dev/null || true) | grep -v ssl-check-renew | grep -v backup-panel-db | grep -v wp-auto-update-check || true; echo "$ssl_cmd"; echo "$db_cmd"; echo "$wp_cmd") | crontab -
+    local disk_cmd="15 * * * * $LLSTACK_DIR/scripts/system/user-disk-refresh.sh >> /var/log/llstack-disk-refresh.log 2>&1"
+    ( (crontab -l 2>/dev/null || true) | grep -v ssl-check-renew | grep -v backup-panel-db | grep -v wp-auto-update-check | grep -v user-disk-refresh || true; echo "$ssl_cmd"; echo "$db_cmd"; echo "$wp_cmd"; echo "$disk_cmd") | crontab -
 }
 
 setup_logrotate() {
