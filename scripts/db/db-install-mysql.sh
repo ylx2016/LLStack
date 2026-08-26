@@ -132,14 +132,12 @@ CNFEOF
 fi
 
 # Verify the installed major.minor actually matches what was requested.
-# The earlier version only checked 8.x branches and used `mysql --version` which
-# returns the client version (matched only because the client and server are
-# from the same package on EL); we now query the live server.
 INSTALLED_VER=""
 if mysql -uroot -e "SELECT VERSION();" &>/dev/null; then
     INSTALLED_VER=$(mysql -uroot -N -B -e "SELECT VERSION();" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+' | head -1)
 elif command -v mysql &>/dev/null; then
-    # Fallback: client banner — only acceptable if we cannot reach the server
+    # Fallback: client banner. MySQL/Percona banners don't have "Distrib",
+    # so the first X.Y IS the version (different from MariaDB's banner).
     INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
 fi
 if [[ -n "$INSTALLED_VER" && "$INSTALLED_VER" != "$VERSION" ]]; then

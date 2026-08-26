@@ -79,10 +79,22 @@ if ! mysql -e 'SELECT 1;' &>/dev/null; then
 fi
 
 INSTALLED_VER=""
-if command -v mysql &>/dev/null; then
-    # `mysql --version` only reports the client; the panel calls bare
-    # `mysql` so client==server in practice (same package on EL).
-    INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+# Prefer the live server's VERSION() — that is what the panel actually
+# talks to. The fallback (mysql --version) is the client banner, which
+# on MariaDB looks like "Ver 15.1 Distrib 10.11.19-MariaDB" — the first
+# "X.Y" is the protocol version (15.1), not the server, so a naive
+# `[0-9]+\.[0-9]+` would catch the wrong number. Match after "Distrib"
+# to get the real version; fall back to the first X.Y only if there is
+# no "Distrib" (the MySQL/Percona banner has no "Distrib" and starts
+# with the real version).
+if mysql -uroot -e "SELECT VERSION();" &>/dev/null; then
+    INSTALLED_VER=$(mysql -uroot -N -B -e "SELECT VERSION();" 2>/dev/null \
+        | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+' | head -1)
+elif command -v mysql &>/dev/null; then
+    INSTALLED_VER=$(mysql --version 2>/dev/null \
+        | grep -oE 'Distrib [0-9]+\.[0-9]+' | head -1 \
+        | sed -E 's/Distrib //')
+    [[ -z "$INSTALLED_VER" ]] && INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1)
 fi
 if [[ -n "$INSTALLED_VER" && "$INSTALLED_VER" != "$VERSION" ]]; then
     echo "{\"ok\":false,\"error\":\"version_mismatch\",\"data\":{\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED_VER\"}}" >&2
