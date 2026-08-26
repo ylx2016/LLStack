@@ -12,7 +12,7 @@ while [[ $# -gt 0 ]]; do
     case "$1" in
         --domain) DOMAIN="$2"; shift 2 ;;
         --remove) REMOVE=true; shift ;;
-        *) shift ;;
+        *) echo '{"ok":false,"error":"unknown_arg"}' >&2; exit 1 ;;
     esac
 done
 
@@ -120,4 +120,10 @@ fi
 
 rm -f "${LSWS_CONF}.bak"
 
-echo '{"ok":true}'
+# Use Python for JSON serialization so the operation result is structured
+# (true success with no useful data → just ok=true is fine here).
+python3 - "$DOMAIN" "$REMOVE" <<'PYEOF'
+import json, sys
+domain, remove = sys.argv[1], sys.argv[2] == "True"
+print(json.dumps({"ok": True, "data": {"domain": domain, "removed": remove}}, separators=(",", ":")))
+PYEOF
