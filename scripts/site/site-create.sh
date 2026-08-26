@@ -258,6 +258,18 @@ chmod 755 "/usr/local/lsws/cachedata/$DOMAIN"
 # takes effect on reload)
 /usr/local/lsws/bin/lswsctrl reload &>/dev/null || true
 
-cat << EOF
-{"ok": true, "data": {"domain": "$DOMAIN", "doc_root": "$DOC_ROOT", "vhost_conf": "$VHOST_CONF", "php_version": "$PHP_VERSION"}}
-EOF
+# Use Python for JSON serialization. $DOMAIN / $DOC_ROOT are validated
+# elsewhere, but json.dumps is the right tool for the contract.
+python3 - "$DOMAIN" "$DOC_ROOT" "$VHOST_CONF" "$PHP_VERSION" <<'PYEOF'
+import json, sys
+domain, doc_root, vhost_conf, php_ver = sys.argv[1:5]
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "domain": domain,
+        "doc_root": doc_root,
+        "vhost_conf": vhost_conf,
+        "php_version": php_ver,
+    },
+}, separators=(",", ":")))
+PYEOF

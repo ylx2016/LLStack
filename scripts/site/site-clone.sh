@@ -255,14 +255,25 @@ echo ">>> Step 5: Reloading LiteHttpd..." >&2
 /usr/local/lsws/bin/lswsctrl reload 2>/dev/null || true
 
 echo ">>> Clone complete!" >&2
-cat << EOF
-{"ok": true, "data": {
-  "source": "$SOURCE_DOMAIN",
-  "target": "$TARGET_DOMAIN",
-  "doc_root": "$TARGET_ROOT",
-  "database": "$TARGET_DB",
-  "db_user": "$DB_USER",
-  "db_password": "***",
-  "wp_replaced": $WP_REPLACE
-}}
-EOF
+# Use Python for JSON serialization. $SOURCE_DOMAIN / $TARGET_DOMAIN /
+# $TARGET_ROOT / $TARGET_DB / $DB_USER all come from --source-domain etc.
+# and have been validated to a domain regex, but json.dumps is the right
+# tool to guarantee the JSON contract regardless.
+python3 - "$SOURCE_DOMAIN" "$TARGET_DOMAIN" "$TARGET_ROOT" "$TARGET_DB" "$DB_USER" "$WP_REPLACE" <<'PYEOF'
+import json, sys
+src, tgt, doc_root, db, db_user, wp_replace = (
+    sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4], sys.argv[5], sys.argv[6] == "true"
+)
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "source": src,
+        "target": tgt,
+        "doc_root": doc_root,
+        "database": db,
+        "db_user": db_user,
+        "db_password": "***",
+        "wp_replaced": wp_replace,
+    },
+}, separators=(",", ":")))
+PYEOF
