@@ -6,9 +6,11 @@ set -euo pipefail
 # Progress goes to stderr; stdout carries only the final JSON document.
 
 VERSION=""
+FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
         *) echo '{"ok":false,"error":"unknown_arg"}' >&2; exit 1 ;;
     esac
 done
@@ -17,6 +19,19 @@ done
 # Validate version (interpolated into repo names and package selection)
 if ! [[ "$VERSION" =~ ^(8\.0|8\.4|9\.[0-9]+)$ ]]; then
     echo '{"ok":false,"error":"invalid_version","message":"Supported: 8.0, 8.4, 9.x"}' >&2; exit 1
+fi
+
+# Idempotency: the setup wizard re-runs each step on retry. If MySQL
+# server is already installed at the requested major.minor, report
+# success so the wizard can move on. --force forces a real reinstall.
+if ! [[ "$FORCE" == true ]] && rpm -q mysql-community-server &>/dev/null; then
+    INSTALLED=$(rpm -q --queryformat '%{VERSION}' mysql-community-server 2>/dev/null | cut -d. -f1,2)
+    if [[ "$INSTALLED" == "$VERSION" ]]; then
+        echo "{\"ok\":true,\"data\":{\"engine\":\"mysql\",\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED\",\"already_installed\":true}}"
+        exit 0
+    fi
+    echo "{\"ok\":false,\"error\":\"version_conflict\",\"message\":\"MySQL $INSTALLED is already installed (requested $VERSION); pass --force to reinstall\"}" >&2
+    exit 1
 fi
 
 # Refuse if a conflicting engine is already installed: MariaDB-client and

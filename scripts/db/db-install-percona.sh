@@ -6,9 +6,11 @@ set -euo pipefail
 # Progress goes to stderr; stdout carries only the final JSON document.
 
 VERSION=""
+FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
         *) echo '{"ok":false,"error":"unknown_arg"}' >&2; exit 1 ;;
     esac
 done
@@ -17,6 +19,18 @@ done
 # Validate version (interpolated into percona-release setup targets)
 if ! [[ "$VERSION" =~ ^8\.(0|4)$ ]]; then
     echo '{"ok":false,"error":"invalid_version","message":"Supported: 8.0, 8.4"}' >&2; exit 1
+fi
+
+# Idempotency: skip if Percona Server is already installed at the
+# requested major.minor. --force overrides.
+if ! [[ "$FORCE" == true ]] && rpm -q percona-server-server &>/dev/null; then
+    INSTALLED=$(rpm -q --queryformat '%{VERSION}' percona-server-server 2>/dev/null | cut -d. -f1,2)
+    if [[ "$INSTALLED" == "$VERSION" ]]; then
+        echo "{\"ok\":true,\"data\":{\"engine\":\"percona\",\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED\",\"already_installed\":true}}"
+        exit 0
+    fi
+    echo "{\"ok\":false,\"error\":\"version_conflict\",\"message\":\"Percona $INSTALLED is already installed (requested $VERSION); pass --force to reinstall\"}" >&2
+    exit 1
 fi
 
 # percona-server-server conflicts with mysql-community-server and MariaDB

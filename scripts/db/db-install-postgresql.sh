@@ -6,9 +6,11 @@ set -euo pipefail
 # Progress goes to stderr; stdout carries only the final JSON document.
 
 VERSION=""
+FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
         *) echo '{"ok":false,"error":"unknown_arg"}' >&2; exit 1 ;;
     esac
 done
@@ -18,6 +20,14 @@ done
 # gets executed (/usr/pgsql-<v>/bin/postgresql-<v>-setup).
 if ! [[ "$VERSION" =~ ^1[6-8]$ ]]; then
     echo '{"ok":false,"error":"invalid_version","message":"Supported: 16, 17, 18"}' >&2; exit 1
+fi
+
+# Idempotency: skip if PostgreSQL is already installed at the requested
+# major. --force overrides.
+if ! [[ "$FORCE" == true ]] && rpm -q "postgresql${VERSION}-server" &>/dev/null; then
+    INSTALLED=$(rpm -q --queryformat '%{VERSION}' "postgresql${VERSION}-server" 2>/dev/null)
+    echo "{\"ok\":true,\"data\":{\"engine\":\"postgresql\",\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED\",\"already_installed\":true}}"
+    exit 0
 fi
 
 MAJOR_VER=$(. /etc/os-release; echo "${VERSION_ID%%.*}")

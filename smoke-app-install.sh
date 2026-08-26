@@ -454,6 +454,32 @@ v=$(extract_mysql 'mysql  Ver 8.4.6-6 for Linux on x86_64 (Percona Server)')
 [ "$v" = "8.4" ] && pass "percona banner: extracts 8.4" \
     || fail "percona banner regex" "got '$v', expected 8.4"
 
+# ─── install script idempotency ────────────────────────────────────
+echo
+echo "── install script idempotency"
+
+# The setup wizard re-runs each step on retry. Each step script must
+# gracefully say "already installed → ok:true" instead of erroring out.
+# We grep the source rather than execute (the install needs real
+# packages + dnf). Note: the JSON string inside bash is escaped as
+# \"ok\":true so we match the actual stored form.
+grep -qF 'already_installed\":true' "$SCRIPTS/php/php-install.sh" \
+    && pass "php-install: skips with already_installed:true" \
+    || fail "php-install: idempotency missing" "no already_installed path"
+
+for f in db/db-install-mariadb.sh db/db-install-mysql.sh db/db-install-percona.sh db/db-install-postgresql.sh; do
+    grep -qF 'already_installed\":true' "$SCRIPTS/$f" \
+        && pass "$f: skips with already_installed:true" \
+        || fail "$f: idempotency missing" "no already_installed path"
+done
+
+# All four must accept --force
+for f in php/php-install.sh db/db-install-mariadb.sh db/db-install-mysql.sh db/db-install-percona.sh db/db-install-postgresql.sh; do
+    grep -qF -- '--force' "$SCRIPTS/$f" \
+        && pass "$f: has --force flag" \
+        || fail "$f: missing --force" ""
+done
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"

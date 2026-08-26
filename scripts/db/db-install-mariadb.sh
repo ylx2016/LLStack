@@ -6,9 +6,11 @@ set -euo pipefail
 # Progress goes to stderr; stdout carries only the final JSON document.
 
 VERSION=""
+FORCE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
         *) echo '{"ok":false,"error":"unknown_arg"}' >&2; exit 1 ;;
     esac
 done
@@ -19,6 +21,21 @@ done
 # baseurl) and get RPM scriptlets executed as root.
 if ! [[ "$VERSION" =~ ^(10\.11|11\.4|11\.8)$ ]]; then
     echo '{"ok":false,"error":"invalid_version","message":"Supported: 10.11, 11.4, 11.8"}' >&2; exit 1
+fi
+
+# Idempotency: the setup wizard re-runs each step on retry. If MariaDB
+# server is already installed at the requested major.minor, treat that
+# as success so the wizard can move on. --force forces a real reinstall.
+if ! [[ "$FORCE" == true ]] && rpm -q MariaDB-server &>/dev/null; then
+    INSTALLED=$(rpm -q --queryformat '%{VERSION}' MariaDB-server 2>/dev/null || echo "")
+    if [[ "$INSTALLED" == "$VERSION" ]]; then
+        echo "{\"ok\":true,\"data\":{\"engine\":\"mariadb\",\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED\",\"already_installed\":true}}"
+        exit 0
+    fi
+    # Different version installed: don't reinstall over it — the operator
+    # must choose. Up to them via the UI; here we just report.
+    echo "{\"ok\":false,\"error\":\"version_conflict\",\"message\":\"MariaDB $INSTALLED is already installed (requested $VERSION); pass --force to reinstall\"}" >&2
+    exit 1
 fi
 
 # MariaDB-client and mysql-community-client both own /usr/bin/mysql (RPM file
