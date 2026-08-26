@@ -106,7 +106,20 @@ setup_panel() {
     mkdir -p "$LLSTACK_DIR"/{data,logs,backups}
 
     # Copy or clone panel files
-    if [[ -d "/opt/llstack-panel" ]]; then
+    if [[ -e "/opt/llstack-panel" ]]; then
+        # Refuse symlinks: a privileged local user can plant a symlink at
+        # /opt/llstack-panel pointing at a directory they control, and the
+        # subsequent `cp -r` will follow it and run whatever code lives there
+        # as root (gunicorn runs as root — see setup_service below).
+        if [[ -L "/opt/llstack-panel" ]]; then
+            err "/opt/llstack-panel is a symlink; refusing to install (it would let a local user inject code run as root)"
+            err "  Replace with a real directory: rm /opt/llstack-panel && mkdir /opt/llstack-panel"
+            exit 1
+        fi
+        if [[ ! -d "/opt/llstack-panel" ]]; then
+            err "/opt/llstack-panel exists but is not a directory"
+            exit 1
+        fi
         cp -r /opt/llstack-panel/backend "$LLSTACK_DIR/"
         cp -r /opt/llstack-panel/web "$LLSTACK_DIR/"
         cp -r /opt/llstack-panel/scripts "$LLSTACK_DIR/"

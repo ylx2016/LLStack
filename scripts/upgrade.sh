@@ -100,6 +100,17 @@ restore_hint() {
 log "Downloading new version..."
 if [[ "$USE_DEV" == true ]]; then
     log "Dev mode: syncing from /opt/llstack-panel"
+    # Refuse symlinks at the dev source, same reasoning as install.sh: a
+    # privileged local user could plant a symlink at /opt/llstack-panel and
+    # have arbitrary code copied in as root.
+    if [[ -L "/opt/llstack-panel" ]]; then
+        err "/opt/llstack-panel is a symlink; refusing to upgrade (would let a local user inject code run as root)"
+        exit 1
+    fi
+    if [[ ! -d "/opt/llstack-panel" ]]; then
+        err "/opt/llstack-panel does not exist or is not a directory"
+        exit 1
+    fi
     SRC="/opt/llstack-panel"
 else
     SRC=$(mktemp -d)
