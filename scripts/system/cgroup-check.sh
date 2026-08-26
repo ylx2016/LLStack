@@ -42,16 +42,24 @@ if [[ -x "$LSCGCTL_PATH" ]]; then
     fi
 fi
 
-cat << EOF
-{"ok": true, "data": {
-  "cgroups_v2": $cgroups_v2,
-  "lscgctl_available": $lscgctl_available,
-  "memory_controller": $memory_controller,
-  "cpu_controller": $cpu_controller,
-  "io_controller": $io_controller,
-  "os_name": "$os_name",
-  "needs_enablement": $needs_enablement,
-  "lscgctl_path": "$LSCGCTL_PATH",
-  "lssetup_path": "$LSSETUP_PATH"
-}}
-EOF
+# Use Python for JSON serialization. $os_name / paths could contain " or \.
+python3 - "$cgroups_v2" "$lscgctl_available" "$memory_controller" \
+        "$cpu_controller" "$io_controller" "$os_name" "$needs_enablement" \
+        "$LSCGCTL_PATH" "$LSSETUP_PATH" <<'PYEOF'
+import json, sys
+data = {
+    "ok": True,
+    "data": {
+        "cgroups_v2": sys.argv[1] == "True",
+        "lscgctl_available": sys.argv[2] == "True",
+        "memory_controller": sys.argv[3] == "True",
+        "cpu_controller": sys.argv[4] == "True",
+        "io_controller": sys.argv[5] == "True",
+        "os_name": sys.argv[6],
+        "needs_enablement": sys.argv[7] == "True",
+        "lscgctl_path": sys.argv[8],
+        "lssetup_path": sys.argv[9],
+    },
+}
+print(json.dumps(data, separators=(",", ":")))
+PYEOF

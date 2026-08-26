@@ -73,6 +73,22 @@ else
     HIT_RATE="0.0"
 fi
 
-cat << EOF
-{"ok": true, "data": {"status": "running", "memory_used_bytes": $MEM_USED, "memory_peak_bytes": $MEM_PEAK, "connected_clients": $CLIENTS, "hit_rate": $HIT_RATE, "uptime_seconds": $UPTIME}}
-EOF
+# Use Python for JSON serialization. All values are system-derived but the
+# contract still calls for a single parseable document on stdout.
+python3 - "$MEM_USED" "$MEM_PEAK" "$CLIENTS" "$HIT_RATE" "$UPTIME" <<'PYEOF'
+import json, sys
+mu, mp, cc, hr, ut = (
+    int(sys.argv[1]), int(sys.argv[2]), int(sys.argv[3]), float(sys.argv[4]), int(sys.argv[5])
+)
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "status": "running",
+        "memory_used_bytes": mu,
+        "memory_peak_bytes": mp,
+        "connected_clients": cc,
+        "hit_rate": hr,
+        "uptime_seconds": ut,
+    },
+}, separators=(",", ":")))
+PYEOF

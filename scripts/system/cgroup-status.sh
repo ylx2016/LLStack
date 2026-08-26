@@ -76,18 +76,27 @@ if [[ -f "$SLICE_PATH/io.pressure" ]]; then
     IO_PRESSURE=$(head -1 "$SLICE_PATH/io.pressure" 2>/dev/null || echo "")
 fi
 
-cat << EOF
-{"ok":true,"data":{
-  "active":true,
-  "user":"$USER",
-  "uid":$UID_NUM,
-  "cpu_quota":"$CPU_QUOTA",
-  "memory_max":"$MEM_MAX_DISPLAY",
-  "memory_current_mb":$MEM_CURRENT_MB,
-  "tasks_max":"$TASKS_MAX_DISPLAY",
-  "tasks_current":$TASKS_CURRENT,
-  "cpu_pressure":"$CPU_PRESSURE",
-  "memory_pressure":"$MEM_PRESSURE",
-  "io_pressure":"$IO_PRESSURE"
-}}
-EOF
+# Use Python for JSON serialization. Pressure strings can contain spaces
+# and quotes; going through json.dumps keeps the contract consistent.
+python3 - "$USER" "$UID_NUM" "$CPU_QUOTA" "$MEM_MAX_DISPLAY" \
+        "$MEM_CURRENT_MB" "$TASKS_MAX_DISPLAY" "$TASKS_CURRENT" \
+        "$CPU_PRESSURE" "$MEM_PRESSURE" "$IO_PRESSURE" <<'PYEOF'
+import json, sys
+data = {
+    "ok": True,
+    "data": {
+        "active": True,
+        "user": sys.argv[1],
+        "uid": int(sys.argv[2]),
+        "cpu_quota": sys.argv[3],
+        "memory_max": sys.argv[4],
+        "memory_current_mb": int(sys.argv[5]),
+        "tasks_max": sys.argv[6],
+        "tasks_current": int(sys.argv[7]),
+        "cpu_pressure": sys.argv[8],
+        "memory_pressure": sys.argv[9],
+        "io_pressure": sys.argv[10],
+    },
+}
+print(json.dumps(data, separators=(",", ":")))
+PYEOF
