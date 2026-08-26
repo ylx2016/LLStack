@@ -431,6 +431,29 @@ grep -q 'git clone --depth 1 --branch "\$ref"' "$SCRIPTS/upgrade.sh" \
     && pass "upgrade.sh: uses \$ref for branch (handles commit/tag/branch uniformly)" \
     || fail "upgrade.sh: branch handling" "no \$ref pattern"
 
+# ─── db-install version_mismatch regex (regression) ─────────────────
+echo
+echo "── db-install version regex"
+
+# A naive [0-9]+\.[0-9]+ on `mysql --version` picks up MariaDB's "Ver 15.1"
+# (the protocol version), not the actual server version. The fix matches
+# "Distrib X.Y" for MariaDB's banner and falls back to the first X.Y for
+# MySQL/Percona. Verify the regex against three real banners.
+extract_mariadb() { echo "$1" | grep -oE 'Distrib [0-9]+\.[0-9]+' | head -1 | sed -E 's/Distrib //'; }
+extract_mysql()   { echo "$1" | grep -oE '[0-9]+\.[0-9]+' | head -1; }
+
+v=$(extract_mariadb 'mysql  Ver 15.1 Distrib 10.11.19-MariaDB, for Linux (x86_64) using readline 5.1')
+[ "$v" = "10.11" ] && pass "mariadb banner: extracts 10.11 (not 15.1)" \
+    || fail "mariadb banner regex" "got '$v', expected 10.11"
+
+v=$(extract_mysql 'mysql  Ver 8.0.43 for Linux on x86_64 (MySQL Community Server - GPL)')
+[ "$v" = "8.0" ] && pass "mysql banner: extracts 8.0" \
+    || fail "mysql banner regex" "got '$v', expected 8.0"
+
+v=$(extract_mysql 'mysql  Ver 8.4.6-6 for Linux on x86_64 (Percona Server)')
+[ "$v" = "8.4" ] && pass "percona banner: extracts 8.4" \
+    || fail "percona banner regex" "got '$v', expected 8.4"
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"
