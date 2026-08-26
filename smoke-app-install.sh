@@ -301,6 +301,68 @@ run "db-user-create: success"         s ""               \
     --password-file "$PW"
 rm -f "$PW" "$PW_BAD"
 
+# ─── cron scripts: contract + DB-driven end-to-end ──────────────────
+echo
+echo "── cron scripts: contract and end-to-end"
+
+# Set up a real panel DB with one cron job, so cron-sync has something to read.
+CRON_DB="$SMOKE/data/llstack.db"
+rm -f "$CRON_DB"
+sqlite3 "$CRON_DB" <<SQL
+CREATE TABLE users (id INTEGER PRIMARY KEY, system_user TEXT);
+CREATE TABLE cron_jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, expression TEXT, command TEXT, enabled BOOLEAN DEFAULT 1, description TEXT);
+INSERT INTO users (id, system_user) VALUES (1, 'alice'), (2, 'bob');
+INSERT INTO cron_jobs (user_id, expression, command, enabled) VALUES
+  (1, '*/5 * * * *',  '/usr/bin/backup.sh',  1),
+  (1, '0 3 * * *',    '/usr/bin/sync.sh',    1),
+  (1, '0 4 * * *',    '/disabled/never.sh',  0);
+SQL
+
+# cron-add
+run "cron-add: unknown arg"           e unknown_arg      \
+    "$SCRIPTS/cron/cron-add.sh" --foo
+run "cron-add: missing args"          e missing_args     \
+    "$SCRIPTS/cron/cron-add.sh"
+run "cron-add: invalid user"          e invalid_user     \
+    "$SCRIPTS/cron/cron-add.sh" --user 'bad;name' --expression '* * * * *' --command /bin/true
+run "cron-add: control char in expr"  e invalid_chars    \
+    "$SCRIPTS/cron/cron-add.sh" --user alice --expression $'bad\ncron' --command /bin/true
+run "cron-add: percent in command"    e invalid_chars    \
+    "$SCRIPTS/cron/cron-add.sh" --user alice --expression '* * * * *' --command 'bad%truncated'
+rm -rf "$SMOKE/crontab/alice"
+LLSTACK_DB_PATH="$CRON_DB" LLSTACK_SCRIPTS_DIR="$SCRIPTS" \
+    run "cron-add: success"          s ""               \
+    "$SCRIPTS/cron/cron-add.sh" --user alice --expression '15 4 * * *' --command /usr/bin/newjob.sh
+# Verify the entry landed
+grep -q '/usr/bin/newjob.sh' "$SMOKE/crontab/alice" \
+    && pass "cron-add: entry persisted to crontab" \
+    || fail "cron-add: entry missing" "expected /usr/bin/newjob.sh in $SMOKE/crontab/alice"
+
+# cron-remove
+LLSTACK_DB_PATH="$CRON_DB" LLSTACK_SCRIPTS_DIR="$SCRIPTS" \
+    run "cron-remove: by expression+command"  s "" \
+    "$SCRIPTS/cron/cron-remove.sh" --user alice --expression '15 4 * * *' --command /usr/bin/newjob.sh
+grep -q '/usr/bin/newjob.sh' "$SMOKE/crontab/alice" \
+    && fail "cron-remove: entry still there" \
+    || pass "cron-remove: entry removed"
+
+# cron-sync — rebuild alice's crontab from the DB. Only enabled jobs (2) should land.
+rm -f "$SMOKE/crontab/alice"
+LLSTACK_DB_PATH="$CRON_DB" LLSTACK_SCRIPTS_DIR="$SCRIPTS" \
+    run "cron-sync: success"         s ""               \
+    "$SCRIPTS/cron/cron-sync.sh" --user alice
+# Verify the disabled row didn't land and the two enabled ones did
+sync_out=$(cat "$SMOKE/crontab/alice" 2>/dev/null || echo "")
+echo "$sync_out" | grep -q '/usr/bin/backup.sh' \
+    && pass "cron-sync: enabled job 1 in crontab" \
+    || fail "cron-sync: enabled job 1 missing" "got: $sync_out"
+echo "$sync_out" | grep -q '/usr/bin/sync.sh' \
+    && pass "cron-sync: enabled job 2 in crontab" \
+    || fail "cron-sync: enabled job 2 missing" "got: $sync_out"
+echo "$sync_out" | grep -q '/disabled/never.sh' \
+    && fail "cron-sync: disabled job leaked into crontab" \
+    || pass "cron-sync: disabled job excluded"
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"
