@@ -61,7 +61,7 @@ for domain_dir in "$SSL_DIR"/*/; do
     REASON=""
     if [[ "$IS_STAGING" == true ]]; then
         REASON="staging_cert"
-    elif [[ "$DAYS_LEFT" -lt 15 ]]; then
+    elif [[ "$DAYS_LEFT" -lt 30 ]]; then
         REASON="expiring_in_${DAYS_LEFT}_days"
     elif [[ "$HAS_WWW" == false ]]; then
         REASON="missing_www_coverage"

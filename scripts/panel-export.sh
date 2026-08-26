@@ -70,6 +70,10 @@ for vdir in /usr/local/lsws/conf/vhosts/*/; do
 done
 
 # 3. SSL certificates
+# Earlier this matched only `*.pem`, but acme.sh's default names include
+# `fullchain.cer`, `domain.cer`, `ca.cer`, `domain.key` and `*.chain.pem` — so
+# most real installs exported zero cert files while still counting the directory
+# as "success". Match the broader set.
 echo "  SSL certificates..." >&2
 mkdir -p "$TMPDIR/ssl"
 SSL_COUNT=0
@@ -77,8 +81,16 @@ for sdir in /usr/local/lsws/conf/ssl/*/; do
     [[ -d "$sdir" ]] || continue
     domain=$(basename "$sdir")
     mkdir -p "$TMPDIR/ssl/$domain"
-    if cp "$sdir"/*.pem "$TMPDIR/ssl/$domain/" 2>/dev/null; then
-        SSL_COUNT=$((SSL_COUNT + 1))
+    # Nullglob so an empty directory doesn't make cp receive the literal "*.pem"
+    # argument. shopt is per-shell so save/restore around the loop.
+    shopt -s nullglob
+    cert_files=("$sdir"/*.pem "$sdir"/*.cer "$sdir"/*.crt "$sdir"/*.key)
+    shopt -u nullglob
+    if [[ ${#cert_files[@]} -gt 0 ]]; then
+        cp "${cert_files[@]}" "$TMPDIR/ssl/$domain/" 2>/dev/null \
+            && SSL_COUNT=$((SSL_COUNT + 1))
+    else
+        echo "    WARNING: $sdir has no .pem/.cer/.crt/.key files — skipping" >&2
     fi
 done
 

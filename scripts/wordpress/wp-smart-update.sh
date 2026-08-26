@@ -37,6 +37,19 @@ DB_NAME=$($WP_CLI config get DB_NAME --path="$CLONE_DIR" --allow-root 2>/dev/nul
 DB_USER=$($WP_CLI config get DB_USER --path="$CLONE_DIR" --allow-root 2>/dev/null || echo "")
 DB_PASS=$($WP_CLI config get DB_PASSWORD --path="$CLONE_DIR" --allow-root 2>/dev/null || echo "")
 
+# If the wp-config has no DB_NAME (e.g. a freshly extracted tarball where the
+# operator hasn't filled in the credentials yet), the previous version silently
+# ran `mysqldump ""` and produced a half-empty clone that "succeeded" — the user
+# would see "safe_to_apply: true" with no errors and a working wp that pointed
+# at the wrong database. Refuse up front.
+if [[ -z "$DB_NAME" || ! "$DB_NAME" =~ ^[A-Za-z0-9_]{1,64}$ ]]; then
+    echo "    ERROR: wp-config.php has no valid DB_NAME (got: '${DB_NAME:-<empty>}'); refusing to clone" >&2
+    ERRORS+=("db_name_missing")
+    # Set safe_to_apply=false and emit the JSON below; cleanup will DROP $CLONE_DB
+    # which is "" — explicitly skip that step by setting DB_NAME to a sentinel
+    DB_NAME=""
+fi
+
 # Generate safe clone DB name (only alphanumeric + underscore)
 SAFE_PREFIX=$(echo "$DB_NAME" | tr -cd 'a-zA-Z0-9_' | head -c 30)
 CLONE_DB="su_${SAFE_PREFIX}_$(date +%s)"
@@ -45,9 +58,17 @@ if ! echo "$CLONE_DB" | grep -qP '^[a-zA-Z_][a-zA-Z0-9_]{0,63}$'; then
     CLONE_DB="su_clone_$(date +%s)"
 fi
 
-echo ">>> Cloning database $DB_NAME → $CLONE_DB..." >&2
-mysql -e "CREATE DATABASE IF NOT EXISTS \`$CLONE_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
-mysqldump --single-transaction --quick "$DB_NAME" 2>/dev/null | mysql "$CLONE_DB" 2>/dev/null
+if [[ -n "$DB_NAME" ]]; then
+    echo ">>> Cloning database $DB_NAME → $CLONE_DB..." >&2
+    if ! mysql -e "CREATE DATABASE IF NOT EXISTS \`$CLONE_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null; then
+        echo "    ERROR: CREATE DATABASE $CLONE_DB failed" >&2
+        ERRORS+=("db_create_failed")
+    fi
+    if ! mysqldump --single-transaction --quick "$DB_NAME" 2>/dev/null | mysql "$CLONE_DB" 2>/dev/null; then
+        echo "    ERROR: mysqldump | mysql failed for $DB_NAME → $CLONE_DB" >&2
+        ERRORS+=("db_clone_failed")
+    fi
+fi
 
 # Grant the original DB user access to clone DB (so wp-cli checks work)
 # Validate DB_USER to prevent SQL injection (alphanumeric + underscore only)
