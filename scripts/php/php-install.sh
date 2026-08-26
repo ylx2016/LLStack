@@ -5,10 +5,12 @@ set -euo pipefail
 # Usage: php-install.sh --version <XX> (e.g. 83 for PHP 8.3)
 
 VERSION=""
+FORCE=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --version) VERSION="$2"; shift 2 ;;
+        --force)   FORCE=true; shift ;;
         *) echo '{"ok": false, "error": "unknown_arg"}' >&2; exit 1 ;;
     esac
 done
@@ -29,10 +31,15 @@ PKG_PREFIX="php${VERSION}"
 LSPHP_PATH="/opt/remi/${PKG_PREFIX}/root/usr/bin/lsphp"
 LSWS_CONF="/usr/local/lsws/conf/httpd_config.conf"
 
-# Check if already installed
+# Idempotency: the setup wizard re-runs each step on retry. Default is to
+# report "already installed" as a successful no-op so the wizard can
+# resume; --force forces a real reinstall.
 if [[ -f "$LSPHP_PATH" ]]; then
-    echo '{"ok": false, "error": "already_installed", "message": "PHP '"$VERSION"' is already installed"}' >&2
-    exit 1
+    if [[ "$FORCE" != true ]]; then
+        echo "{\"ok\":true,\"data\":{\"version\":\"php${VERSION}\",\"display\":\"PHP ${VERSION:0:1}.${VERSION:1}\",\"lsphp_path\":\"$LSPHP_PATH\",\"already_installed\":true}}"
+        exit 0
+    fi
+    echo ">>> PHP $VERSION already installed, --force given: reinstalling" >&2
 fi
 
 # Check REMI repo is available
