@@ -127,12 +127,17 @@ else
     #   1. --version <sha-or-tag> on the command line (operator's choice)
     #   2. LLSTACK_COMMIT env (CI / reproducible build)
     #   3. default branch HEAD (current behaviour when nothing is set)
-    # `--branch` accepts tags, branch names, and commit SHAs in git, so the
-    # same code path covers all three.
+    # Branches / tags: `git clone --depth 1 --branch <ref>` works.
+    # Commit SHAs off the default branch: that flag fails with a depth-1
+    # clone, so we fall back to a full clone + checkout.
     ref=""
     [[ -n "$TARGET_VERSION" ]] && ref="$TARGET_VERSION"
     [[ -z "$ref" && -n "$LLSTACK_COMMIT" ]] && ref="$LLSTACK_COMMIT"
-    if [[ -n "$ref" ]]; then
+    is_sha() { [[ "$1" =~ ^[0-9a-f]{7,40}$ ]]; }
+    if [[ -n "$ref" ]] && is_sha "$ref"; then
+        git clone "$LLSTACK_REPO" "$SRC" >&2
+        git -C "$SRC" checkout "$ref" >&2
+    elif [[ -n "$ref" ]]; then
         git clone --depth 1 --branch "$ref" "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
     else
         git clone --depth 1 "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1

@@ -158,10 +158,14 @@ setup_panel() {
         # copies whatever they put there into $LLSTACK_DIR and runs it as root.
         SRC_DIR=$(mktemp -d /tmp/llstack-src.XXXXXXXXXX)
         chmod 700 "$SRC_DIR"
-        # --branch works for commit SHAs, tags, and branch names in git, so
-        # LLSTACK_COMMIT and a versioned release tag can use the same code path.
         if [[ -n "$LLSTACK_COMMIT" ]]; then
-            git clone --depth 1 --branch "$LLSTACK_COMMIT" "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+            # SHAs off the default branch can't be fetched with --depth 1
+            # (the server only ships the tip of the remote's HEAD). A full
+            # clone is the only way to ask the server to find an arbitrary
+            # commit; the cost is one full checkout of the panel repo, which
+            # is small in practice.
+            git clone "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+            git -C "$SRC_DIR/repo" checkout "$LLSTACK_COMMIT" >&2
         else
             git clone --depth 1 "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
         fi
