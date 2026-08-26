@@ -43,7 +43,10 @@ if [[ ! -x /usr/local/bin/composer ]]; then
     fi
     SETUP_FILE=$(mktemp); mv "$SETUP_FILE" "${SETUP_FILE}.php"; SETUP_FILE="${SETUP_FILE}.php"
     # GNU mktemp requires the template to end in X; rename after creation.
-    trap 'rm -f "$SETUP_FILE"' EXIT
+    # Two temp paths are created (SETUP_FILE and STAGING) and need cleanup on
+    # any exit path. Use an array so paths with whitespace stay intact.
+    TO_CLEAN=("$SETUP_FILE")
+    trap 'rm -f -- "${TO_CLEAN[@]}"' EXIT
     # -fS so a non-2xx response is treated as failure instead of a saved
     # HTML error page. -L follows the redirect from /installer to the actual
     # tagged download.
@@ -73,7 +76,8 @@ SITE_USER=$(stat -c '%U' "$DOC_ROOT" 2>/dev/null || echo root)
 # the doc-root first, so an interrupted create-project left the site gone with
 # no rollback path.
 STAGING=$(mktemp -d)
-trap 'rm -rf "$STAGING"' EXIT
+TO_CLEAN+=("$STAGING")
+trap 'rm -rf -- "${TO_CLEAN[@]}"' EXIT
 
 echo ">>> Running composer create-project laravel/laravel..." >&2
 if ! sudo -u "$SITE_USER" /usr/local/bin/composer create-project --no-interaction --no-progress laravel/laravel "$STAGING" >&2; then
