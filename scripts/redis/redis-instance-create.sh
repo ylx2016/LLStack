@@ -76,7 +76,7 @@ unixsocket $REDIS_SOCK
 unixsocketperm 700
 
 # Authentication
-requirepass $ESCAPED_PW
+requirepass "$ESCAPED_PW"
 
 # Memory
 maxmemory ${MAXMEMORY}mb
@@ -111,21 +111,24 @@ CONFEOF
 chown "$USER:$USER" "$REDIS_CONF"
 chmod 600 "$REDIS_CONF"
 
-# 3. Create systemd template unit (if not exists)
-TEMPLATE="/etc/systemd/system/redis@.service"
-if [[ ! -f "$TEMPLATE" ]] || ! grep -q "$REDIS_SERVER_BIN" "$TEMPLATE" 2>/dev/null; then
-    cat > "$TEMPLATE" <<SVCEOF
+# 3. Create systemd unit with the concrete paths for THIS user.
+# A per-user unit (not a shared template) avoids two bugs: (a) the root instance's
+# home is /var/lib/llstack while the template's %h would resolve to /root; (b) a
+# shared template gets overwritten when different users use different redis/valkey
+# binaries. The env/conf/socket live in REDIS_DIR, so embed it directly.
+UNIT_FILE="/etc/systemd/system/redis@${USER}.service"
+cat > "$UNIT_FILE" <<SVCEOF
 [Unit]
-Description=Redis/Valkey instance for %i
+Description=Redis/Valkey instance for ${USER}
 After=network.target
 
 [Service]
 Type=simple
-User=%i
-Group=%i
-EnvironmentFile=-%h/.redis/env
-ExecStart=${REDIS_SERVER_BIN} %h/.redis/redis.conf
-ExecStop=/bin/bash -c 'REDISCLI_AUTH="\$REDIS_PASSWORD" ${REDIS_CLI_BIN} -s %h/.redis/redis.sock shutdown nosave'
+User=${USER}
+Group=${USER}
+EnvironmentFile=-${REDIS_DIR}/env
+ExecStart=${REDIS_SERVER_BIN} ${REDIS_DIR}/redis.conf
+ExecStop=/bin/bash -c 'REDISCLI_AUTH="\$REDIS_PASSWORD" ${REDIS_CLI_BIN} -s ${REDIS_DIR}/redis.sock shutdown nosave'
 Restart=always
 RestartSec=5
 LimitNOFILE=10032
@@ -134,8 +137,7 @@ PrivateTmp=yes
 [Install]
 WantedBy=multi-user.target
 SVCEOF
-    systemctl daemon-reload
-fi
+systemctl daemon-reload
 
 # 3b. Create env file for systemd (password not visible in unit or /proc)
 ENV_FILE="$REDIS_DIR/env"
@@ -144,7 +146,8 @@ chown "$USER:$USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 
 # 4. Enable and start
-systemctl enable "$SERVICE_NAME" 2>/dev/null
+# Tolerate enable failing (e.g. template unit already present) so start always runs.
+systemctl enable "$SERVICE_NAME" 2>/dev/null || true
 systemctl start "$SERVICE_NAME"
 
 # 5. Wait for socket
