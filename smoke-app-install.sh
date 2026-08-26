@@ -480,6 +480,13 @@ for f in php/php-install.sh db/db-install-mariadb.sh db/db-install-mysql.sh db/d
         || fail "$f: missing --force" ""
 done
 
+# install.sh must anchor its CWD up front so an interactive shell whose
+# current dir was deleted between run start and exec doesn't error out
+# with "cannot access parent directories".
+head -10 "$SCRIPTS/install.sh" | grep -qE 'cd /tmp 2>/dev/null' \
+    && pass "install.sh: anchors CWD to /tmp up front" \
+    || fail "install.sh: missing cd /tmp guard" ""
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"

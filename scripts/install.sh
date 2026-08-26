@@ -5,6 +5,12 @@ set -euo pipefail
 # Installs ONLY essential components. PHP/DB/extras are selected in the web wizard.
 # Usage: curl -sSL https://install.llstack.com | bash
 
+# Many operators run this from an interactive shell whose CWD is later
+# deleted (e.g. they downloaded a tarball and unpacked it). The shell-init
+# error "cannot access parent directories" then breaks the entire run
+# before we even start. Anchor to a guaranteed-existing dir up front.
+cd /tmp 2>/dev/null || cd /
+
 LLSTACK_DIR="/opt/llstack"
 LLSTACK_USER="llstack"
 LLSTACK_PORT=30333
