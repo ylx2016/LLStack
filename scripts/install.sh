@@ -8,7 +8,18 @@ set -euo pipefail
 LLSTACK_DIR="/opt/llstack"
 LLSTACK_USER="llstack"
 LLSTACK_PORT=30333
-LLSTACK_REPO="https://github.com/web-casa/LLStack"
+# LLSTACK_REPO is the source for the panel's own code. The previous version
+# hardcoded the upstream author's repo, which means a fork user testing
+# this installer pulled the *author's* tree — including any of their
+# unmerged or pushed-but-not-reviewed changes — instead of their own. Now
+# overridable via env so a fork can install its own tree, and so a CI /
+# reproducible build can pin to a specific tag or commit.
+LLSTACK_REPO="${LLSTACK_REPO:-https://github.com/web-casa/LLStack}"
+# Optional commit/tag/branch to pin the panel install to. When unset, the
+# branch HEAD is used (current default behaviour). Setting this is the
+# only way to get a reproducible install — without it, "git clone" pulls
+# whatever the repo's HEAD happens to be at install time.
+LLSTACK_COMMIT="${LLSTACK_COMMIT:-}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -84,7 +95,21 @@ install_repos() {
 
 install_litehttpd() {
     log "Installing LiteHttpd..."
-    curl -s https://rpms.litehttpd.com/setup.sh | bash 2>&1 | tail -1
+    # The setup.sh at rpms.litehttpd.com is fetched and piped to bash as
+    # root. This is a remote-script-as-RCE pattern: anyone who can serve
+    # a response on that domain (DNS hijack, registrar compromise, or
+    # the domain's owner themselves) gets arbitrary code execution on
+    # every box that runs this installer. There is no signature check
+    # and no checksum in the URL. Refusing to make this the only
+    # install path makes the operator decide.
+    if [[ "${LLSTACK_SKIP_LITEHTTPD_REPO:-}" == "1" ]]; then
+        warn "LLSTACK_SKIP_LITEHTTPD_REPO=1 — skipping rpms.litehttpd.com repo setup (you must add the repo manually)"
+    else
+        warn "About to run: curl -s https://rpms.litehttpd.com/setup.sh | bash"
+        warn "This fetches a remote shell script and runs it as root."
+        warn "To skip: set LLSTACK_SKIP_LITEHTTPD_REPO=1 (you will need to add the LiteHttpd yum repo manually)."
+        curl -s https://rpms.litehttpd.com/setup.sh | bash 2>&1 | tail -1
+    fi
     dnf install -y openlitespeed-litehttpd 2>&1 | tail -1
     systemctl enable lshttpd
 }
@@ -133,7 +158,13 @@ setup_panel() {
         # copies whatever they put there into $LLSTACK_DIR and runs it as root.
         SRC_DIR=$(mktemp -d /tmp/llstack-src.XXXXXXXXXX)
         chmod 700 "$SRC_DIR"
-        git clone --depth 1 "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+        # --branch works for commit SHAs, tags, and branch names in git, so
+        # LLSTACK_COMMIT and a versioned release tag can use the same code path.
+        if [[ -n "$LLSTACK_COMMIT" ]]; then
+            git clone --depth 1 --branch "$LLSTACK_COMMIT" "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+        else
+            git clone --depth 1 "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+        fi
         cp -r "$SRC_DIR"/repo/{backend,web,scripts,config,templates} "$LLSTACK_DIR/"
         cp "$SRC_DIR/repo/VERSION" "$LLSTACK_DIR/VERSION" 2>/dev/null || true
         cp "$SRC_DIR/repo/versions.json" "$LLSTACK_DIR/versions.json" 2>/dev/null || true

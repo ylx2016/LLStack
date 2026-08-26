@@ -5,7 +5,12 @@ set -euo pipefail
 # Usage: upgrade.sh [--version <tag>] [--dev] [--force-downgrade]
 
 LLSTACK_DIR="/opt/llstack"
-LLSTACK_REPO="https://github.com/web-casa/LLStack"
+# See install.sh for the rationale. A fork user (or a CI build) needs to
+# be able to override which repo the upgrade pulls from, and ideally pin
+# to a specific commit so two upgrades a week apart don't silently get
+# different code.
+LLSTACK_REPO="${LLSTACK_REPO:-https://github.com/web-casa/LLStack}"
+LLSTACK_COMMIT="${LLSTACK_COMMIT:-}"
 TARGET_VERSION=""
 USE_DEV=false
 FORCE_DOWNGRADE=false
@@ -118,8 +123,17 @@ else
     # at trap-FIRE time, not at trap-SET time. With double quotes, the literal
     # string `rm -rf '$SRC'` was stored and the tmp dir leaked on every upgrade.
     trap 'rm -rf "$SRC"' EXIT
-    if [[ -n "$TARGET_VERSION" ]]; then
-        git clone --depth 1 --branch "$TARGET_VERSION" "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
+    # Priority for what we check out at the target ref, in order:
+    #   1. --version <sha-or-tag> on the command line (operator's choice)
+    #   2. LLSTACK_COMMIT env (CI / reproducible build)
+    #   3. default branch HEAD (current behaviour when nothing is set)
+    # `--branch` accepts tags, branch names, and commit SHAs in git, so the
+    # same code path covers all three.
+    ref=""
+    [[ -n "$TARGET_VERSION" ]] && ref="$TARGET_VERSION"
+    [[ -z "$ref" && -n "$LLSTACK_COMMIT" ]] && ref="$LLSTACK_COMMIT"
+    if [[ -n "$ref" ]]; then
+        git clone --depth 1 --branch "$ref" "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
     else
         git clone --depth 1 "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
     fi

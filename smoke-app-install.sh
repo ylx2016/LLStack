@@ -388,6 +388,49 @@ OUT=$("$SCRIPTS/litehttpd/litehttpd-status.sh" 2>/dev/null)
     && pass "litehttpd-status: shape has status/pid/connections" \
     || fail "litehttpd-status: shape" "got: $OUT"
 
+# ─── install/upgrade supply-chain env vars ───────────────────────────
+echo
+echo "── install/upgrade supply-chain env vars"
+
+# Verify LLSTACK_REPO is overridable and falls back to web-casa. We do this
+# by sourcing the env-handling lines and checking the resolved values — the
+# scripts themselves can't be run end-to-end here (they would try to install
+# a real panel).
+extract_defaults() {
+    awk '
+        /^LLSTACK_REPO=/{ print "REPO=" $0; next }
+        /^LLSTACK_COMMIT=/{ print "COMMIT=" $0; next }
+    ' "$1" | sed -E 's/^[^=]+=//; s/^\$\{LLSTACK_[A-Z]+:-(.*)\}$/\1/' | head -4
+}
+defaults=$(extract_defaults "$SCRIPTS/install.sh")
+echo "$defaults" | grep -q 'web-casa/LLStack' \
+    && pass "install.sh: LLSTACK_REPO defaults to web-casa/LLStack" \
+    || fail "install.sh: LLSTACK_REPO default" "got: $defaults"
+
+# Same for upgrade.sh
+defaults=$(extract_defaults "$SCRIPTS/upgrade.sh")
+echo "$defaults" | grep -q 'web-casa/LLStack' \
+    && pass "upgrade.sh: LLSTACK_REPO defaults to web-casa/LLStack" \
+    || fail "upgrade.sh: LLSTACK_REPO default" "got: $defaults"
+
+# LLSTACK_SKIP_LITEHTTPD_REPO must be referenced in install.sh
+grep -q 'LLSTACK_SKIP_LITEHTTPD_REPO' "$SCRIPTS/install.sh" \
+    && pass "install.sh: has LLSTACK_SKIP_LITEHTTPD_REPO knob" \
+    || fail "install.sh: missing skip knob" "no LLSTACK_SKIP_LITEHTTPD_REPO"
+
+# LLSTACK_COMMIT must be referenced in both
+grep -q 'LLSTACK_COMMIT' "$SCRIPTS/install.sh" \
+    && pass "install.sh: has LLSTACK_COMMIT pin" \
+    || fail "install.sh: missing LLSTACK_COMMIT" ""
+grep -q 'LLSTACK_COMMIT' "$SCRIPTS/upgrade.sh" \
+    && pass "upgrade.sh: has LLSTACK_COMMIT pin" \
+    || fail "upgrade.sh: missing LLSTACK_COMMIT" ""
+
+# Verify the clone lines now have the env-var based branch handling
+grep -q 'git clone --depth 1 --branch "\$ref"' "$SCRIPTS/upgrade.sh" \
+    && pass "upgrade.sh: uses \$ref for branch (handles commit/tag/branch uniformly)" \
+    || fail "upgrade.sh: branch handling" "no \$ref pattern"
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"
