@@ -487,6 +487,25 @@ grep -qE 'cd /tmp 2>/dev/null' "$SCRIPTS/install.sh" \
     && pass "install.sh: anchors CWD to /tmp up front" \
     || fail "install.sh: missing cd /tmp guard" ""
 
+# ─── ssl + redis compatibility fixes ────────────────────────────────
+echo
+echo "── ssl + redis compatibility"
+
+# acme.sh v3+ defaults to ZeroSSL which requires email registration
+# before any cert is issued. Pin Let's Encrypt so HTTP-01 still works
+# without an email step.
+grep -qF -- '--server letsencrypt' "$SCRIPTS/ssl/ssl-issue.sh" \
+    && pass "ssl-issue: pins Let's Encrypt (avoids acme.sh v3 ZeroSSL default)" \
+    || fail "ssl-issue: missing --server letsencrypt" ""
+
+# EL10 ships Valkey instead of Redis. Many tools (including the panel
+# backend) hardcode `redis.service`; redis-install.sh must create an
+# alias so the historical unit name still resolves.
+grep -qF 'ln -s valkey.service /etc/systemd/system/redis.service' \
+    "$SCRIPTS/redis/redis-install.sh" \
+    && pass "redis-install: creates redis.service symlink for Valkey compat" \
+    || fail "redis-install: missing redis.service alias" ""
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"

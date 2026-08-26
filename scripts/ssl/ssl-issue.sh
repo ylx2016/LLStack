@@ -58,14 +58,19 @@ mkdir -p "$WEBROOT/.well-known/acme-challenge"
 chmod -R 755 "$WEBROOT/.well-known"
 chown -R nobody:nobody "$WEBROOT/.well-known" 2>/dev/null || true
 
+echo ">>> Setting up webroot..." >&2
 mkdir -p "$CERT_DIR/$DOMAIN"
 
-# Issue certificate
+# Issue certificate. acme.sh v3+ uses ZeroSSL as the default CA, which
+# requires a registered email before any cert can be issued. We're not
+# asking the user for an email — pin Let's Encrypt instead, which still
+# works with no registration for HTTP-01 challenges.
+echo ">>> Issuing certificate for $DOMAIN..." >&2
 if ! "$ACME_HOME/acme.sh" --issue \
     -d "$DOMAIN" \
     -w "$WEBROOT" \
     --keylength ec-256 \
-    >&2 2>&1; then
+    --server letsencrypt >&2 2>&1; then
     # Check if cert already exists (acme.sh returns non-zero for "already issued")
     if [[ ! -f "$CERT_DIR/$DOMAIN/fullchain.pem" ]]; then
         echo '{"ok": false, "error": "cert_issue_failed", "message": "acme.sh --issue failed"}' >&2
