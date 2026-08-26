@@ -116,6 +116,14 @@ tar czf "$OUTPUT" ./* 2>/dev/null
 
 SIZE=$(stat -c%s "$OUTPUT" 2>/dev/null || echo 0)
 
-cat << EOF
-{"ok": true, "data": {"path": "$OUTPUT", "size": $SIZE, "type": "$TYPE"}}
-EOF
+# Use Python for JSON serialization. $OUTPUT is a file path the operator
+# provided via --output and could contain " or \. $TYPE is validated
+# (full|files|db) but the doc tree is built once via json.dumps either way.
+python3 - "$OUTPUT" "$SIZE" "$TYPE" <<'PYEOF'
+import json, sys
+output, size, type_ = sys.argv[1], int(sys.argv[2]), sys.argv[3]
+print(json.dumps({
+    "ok": True,
+    "data": {"path": output, "size": size, "type": type_},
+}, separators=(",", ":")))
+PYEOF

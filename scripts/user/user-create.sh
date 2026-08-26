@@ -58,6 +58,17 @@ else
     usermod -aG nobody "$USERNAME" 2>/dev/null || true
 fi
 
-cat << EOF
-{"ok": true, "data": {"username": "$USERNAME", "home_dir": "$HOME_DIR", "uid": $(id -u "$USERNAME")}}
-EOF
+# Use Python for JSON serialization. $USERNAME is validated to a username
+# regex but $HOME_DIR is system-derived and could include spaces.
+python3 - "$USERNAME" "$HOME_DIR" <<'PYEOF'
+import json, sys, os
+username, home_dir = sys.argv[1], sys.argv[2]
+try:
+    uid = os.getuid() if username == "root" else __import__("pwd").getpwnam(username).pw_uid
+except Exception:
+    uid = 0
+print(json.dumps({
+    "ok": True,
+    "data": {"username": username, "home_dir": home_dir, "uid": uid},
+}, separators=(",", ":")))
+PYEOF

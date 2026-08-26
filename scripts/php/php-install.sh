@@ -117,6 +117,19 @@ fi
 
 DISPLAY="PHP ${VERSION:0:1}.${VERSION:1}"
 
-cat << EOF
-{"ok": true, "data": {"version": "php${VERSION}", "display": "$DISPLAY", "lsphp_path": "$LSPHP_PATH", "extensions": "$EXTENSIONS"}}
-EOF
+# Use Python for JSON serialization. $LSPHP_PATH / $EXTENSIONS are
+# system-controlled, but going through json.dumps keeps the contract
+# consistent with the rest of the panel.
+python3 - "php${VERSION}" "$DISPLAY" "$LSPHP_PATH" "$EXTENSIONS" <<'PYEOF'
+import json, sys
+version, display, lsphp, exts = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "version": version,
+        "display": display,
+        "lsphp_path": lsphp,
+        "extensions": exts,
+    },
+}, separators=(",", ":")))
+PYEOF
