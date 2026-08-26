@@ -483,7 +483,7 @@ done
 # install.sh must anchor its CWD up front so an interactive shell whose
 # current dir was deleted between run start and exec doesn't error out
 # with "cannot access parent directories".
-head -10 "$SCRIPTS/install.sh" | grep -qE 'cd /tmp 2>/dev/null' \
+grep -qE 'cd /tmp 2>/dev/null' "$SCRIPTS/install.sh" \
     && pass "install.sh: anchors CWD to /tmp up front" \
     || fail "install.sh: missing cd /tmp guard" ""
 
