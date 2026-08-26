@@ -30,8 +30,15 @@ if ! rpm -q pgdg-redhat-repo &>/dev/null; then
     fi
 fi
 
-# Disable the built-in PostgreSQL module (needed on EL8, harmless on EL9+)
-dnf -qy module disable postgresql 2>/dev/null || true
+# Disable the built-in PostgreSQL module (needed on EL8 dnf4, harmless on
+# EL9+, and the `module` subcommand doesn't exist on dnf5 at all). The
+# `|| true` makes the dnf5 case silent; we add a version check so the
+# dnf4 case still gets the intended behavior.
+echo ">>> Preparing PostgreSQL repositories..." >&2
+dnf_major=$(dnf --version 2>/dev/null | head -1 | awk -F. '{print $1}')
+if [[ "$dnf_major" != "5" ]]; then
+    dnf -qy module disable postgresql 2>/dev/null || true
+fi
 
 echo ">>> Installing PostgreSQL $VERSION..." >&2
 if ! dnf install -y "postgresql${VERSION}-server" "postgresql${VERSION}" >&2 2>&1; then
@@ -61,6 +68,10 @@ if ! systemctl enable --now "$SERVICE" >&2 2>&1; then
 fi
 
 INSTALLED_VER=$("/usr/pgsql-${VERSION}/bin/psql" --version 2>/dev/null | grep -oE '[0-9]+' | head -1 || echo "")
+if [[ -n "$INSTALLED_VER" && "$INSTALLED_VER" != "$VERSION" ]]; then
+    echo "{\"ok\":false,\"error\":\"version_mismatch\",\"data\":{\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED_VER\"}}" >&2
+    exit 1
+fi
 
 echo ">>> PostgreSQL $VERSION installed successfully" >&2
 # Report the versioned unit name: the panel's service list and llstack-ctl's

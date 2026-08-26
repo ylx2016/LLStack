@@ -78,7 +78,16 @@ if ! mysql -e 'SELECT 1;' &>/dev/null; then
     exit 1
 fi
 
-INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+INSTALLED_VER=""
+if command -v mysql &>/dev/null; then
+    # `mysql --version` only reports the client; the panel calls bare
+    # `mysql` so client==server in practice (same package on EL).
+    INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+fi
+if [[ -n "$INSTALLED_VER" && "$INSTALLED_VER" != "$VERSION" ]]; then
+    echo "{\"ok\":false,\"error\":\"version_mismatch\",\"data\":{\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED_VER\"}}" >&2
+    exit 1
+fi
 
 echo ">>> MariaDB $VERSION installed successfully" >&2
 printf '{"ok":true,"data":{"engine":"mariadb","requested":"%s","installed":"%s","upstream_repo":%s}}\n' \
