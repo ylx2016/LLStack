@@ -17,6 +17,9 @@ RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
 
 SMOKE=/tmp/smoke
 SCRIPTS=/z/t/LLStack-main/scripts
+# /usr/local/bin/sqlite3 is a symlink to the real sqlite3.exe the user
+# installed at C:\Users\hjm\Desktop\claude\sqlite3\sqlite3.exe (the bash
+# wrapper at /tmp/smoke/bin/sqlite3 is no longer needed and was removed).
 export PATH="/usr/local/bin:/tmp/smoke/bin:/usr/bin:/bin"
 pass() { echo "  ${GRN}PASS${NC}: $1"; PASS=$((PASS+1)); }
 fail() { echo "  ${RED}FAIL${NC}: $1 — $2"; FAIL=$((FAIL+1)); }
@@ -362,6 +365,28 @@ echo "$sync_out" | grep -q '/usr/bin/sync.sh' \
 echo "$sync_out" | grep -q '/disabled/never.sh' \
     && fail "cron-sync: disabled job leaked into crontab" \
     || pass "cron-sync: disabled job excluded"
+
+# ─── status scripts: contract only (no end-to-end since no real systemd) ──
+echo
+echo "── status scripts: JSON contract"
+
+run "service-status: no args"        s ""  \
+    "$SCRIPTS/monitoring/service-status.sh"
+# Verify the output is a real JSON array of services
+OUT=$("$SCRIPTS/monitoring/service-status.sh" 2>/dev/null)
+[[ "$OUT" == *'"data":'* ]] && pass "service-status: shape includes data field" \
+    || fail "service-status: shape" "no data field"
+# lshttpd should be in the output (the fake systemctl says it's installed)
+echo "$OUT" | grep -q '"name": "litehttpd"' \
+    && pass "service-status: includes installed service" \
+    || fail "service-status: missing service" "no litehttpd entry"
+
+run "litehttpd-status: no args"       s ""  \
+    "$SCRIPTS/litehttpd/litehttpd-status.sh"
+OUT=$("$SCRIPTS/litehttpd/litehttpd-status.sh" 2>/dev/null)
+[[ "$OUT" == *'"pid":'* && "$OUT" == *'"status":'* && "$OUT" == *'"connections":'* ]] \
+    && pass "litehttpd-status: shape has status/pid/connections" \
+    || fail "litehttpd-status: shape" "got: $OUT"
 
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
