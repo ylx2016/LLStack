@@ -32,8 +32,13 @@ done
 MAJOR_VER=$(. /etc/os-release; echo "${VERSION_ID%%.*}")
 
 # dnf5 (EL10) replaced `config-manager --enable X` with `config-manager setopt X.enabled=1`
+# The earlier version grepped for '^dnf5' but real dnf5 prints just "5.2.6" —
+# the match never fired on EL10, and the script silently fell through to the
+# dnf4 branch where dnf5 errors out with "Unknown argument".
 repo_set() {  # repo_set <repo> <0|1>
-    if dnf --version 2>/dev/null | head -1 | grep -q '^dnf5'; then
+    local dnf_major
+    dnf_major=$(dnf --version 2>/dev/null | head -1 | awk -F. '{print $1}')
+    if [[ "$dnf_major" == "5" ]]; then
         dnf config-manager setopt "$1.enabled=$2" 2>/dev/null || true
     else
         [[ "$2" == "1" ]] && dnf config-manager --enable "$1" 2>/dev/null || true
