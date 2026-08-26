@@ -506,6 +506,28 @@ grep -qF 'ln -s valkey.service /etc/systemd/system/redis.service' \
     && pass "redis-install: creates redis.service symlink for Valkey compat" \
     || fail "redis-install: missing redis.service alias" ""
 
+# install.sh must wire adminer-install into the install flow — without
+# it, the panel returns adminer_not_installed on every DB page.
+grep -qF 'adminer-install.sh' "$SCRIPTS/install.sh" \
+    && pass "install.sh: wires adminer-install into the flow" \
+    || fail "install.sh: missing adminer-install wiring" ""
+
+[ -f "$SCRIPTS/adminer-install.sh" ] \
+    && pass "adminer-install.sh: exists" \
+    || fail "adminer-install.sh: missing script" ""
+
+grep -qF '/opt/llstack/web/adminer' "$SCRIPTS/adminer-install.sh" \
+    && pass "adminer-install: targets /opt/llstack/web/adminer (panel's expected path)" \
+    || fail "adminer-install: wrong target path" ""
+
+# Idempotency markers (consistent with the other install scripts)
+grep -qF 'already_installed\":true' "$SCRIPTS/adminer-install.sh" \
+    && pass "adminer-install: idempotent (skips when already installed)" \
+    || fail "adminer-install: missing idempotency" ""
+grep -qF -- '--force' "$SCRIPTS/adminer-install.sh" \
+    && pass "adminer-install: has --force flag" \
+    || fail "adminer-install: missing --force" ""
+
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
 echo "======================================"

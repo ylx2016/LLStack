@@ -386,6 +386,10 @@ main() {
     setup_ssl_cron
     setup_firewall
     setup_logrotate
+    # Adminer (PHP DB admin UI) — the panel backend references
+    # /opt/llstack/web/adminer/index.php when rendering any DB page;
+    # without it every DB page returns adminer_not_installed.
+    bash "$LLSTACK_DIR/scripts/adminer-install.sh"
     # Install llstack-ctl CLI
     ln -sf "$LLSTACK_DIR/scripts/llstack-ctl" /usr/local/bin/llstack-ctl
     print_summary
