@@ -115,11 +115,16 @@ setup_panel() {
         cp /opt/llstack-panel/versions.json "$LLSTACK_DIR/versions.json" 2>/dev/null || true
         cp -r /opt/llstack-panel/templates "$LLSTACK_DIR/" 2>/dev/null || true
     else
-        git clone --depth 1 "$LLSTACK_REPO" /tmp/llstack-src 2>&1 | tail -1
-        cp -r /tmp/llstack-src/{backend,web,scripts,config,templates} "$LLSTACK_DIR/"
-        cp /tmp/llstack-src/VERSION "$LLSTACK_DIR/VERSION" 2>/dev/null || true
-        cp /tmp/llstack-src/versions.json "$LLSTACK_DIR/versions.json" 2>/dev/null || true
-        rm -rf /tmp/llstack-src
+        # mktemp -d, not a fixed /tmp path: a symlink planted at /tmp/llstack-src
+        # by a local user is followed by both the clone and the cp below, which
+        # copies whatever they put there into $LLSTACK_DIR and runs it as root.
+        SRC_DIR=$(mktemp -d /tmp/llstack-src.XXXXXXXXXX)
+        chmod 700 "$SRC_DIR"
+        git clone --depth 1 "$LLSTACK_REPO" "$SRC_DIR/repo" >&2
+        cp -r "$SRC_DIR"/repo/{backend,web,scripts,config,templates} "$LLSTACK_DIR/"
+        cp "$SRC_DIR/repo/VERSION" "$LLSTACK_DIR/VERSION" 2>/dev/null || true
+        cp "$SRC_DIR/repo/versions.json" "$LLSTACK_DIR/versions.json" 2>/dev/null || true
+        rm -rf "$SRC_DIR"
     fi
 
     # Python
@@ -135,38 +140,36 @@ setup_panel() {
     fi
     log "Frontend pre-built dist/ found ($(ls "$LLSTACK_DIR/web/dist/assets/"*.js 2>/dev/null | wc -l) chunks)"
 
-    # serve_app.py
-    cat > "$LLSTACK_DIR/backend/serve_app.py" << 'PYEOF'
-import os
-from app import create_app
-from flask import send_from_directory
-app = create_app()
-DIST = os.environ.get('LLSTACK_DIST_DIR', '/opt/llstack/web/dist')
-@app.route('/', defaults={'path': ''})
-@app.route('/<path:path>')
-def serve(path):
-    # Never intercept API or WebSocket routes (handled by blueprints)
-    if path.startswith(('api/', 'ws/')):
-        from flask import abort
-        abort(404)
-    f = os.path.join(DIST, path)
-    if path and os.path.isfile(f):
-        return send_from_directory(DIST, path)
-    return send_from_directory(DIST, 'index.html')
-PYEOF
+    # serve_app.py ships in the repo (backend/serve_app.py). Do NOT regenerate it here:
+    # a heredoc copy is a second source of truth that silently discards repo-side fixes.
+    if [[ ! -f "$LLSTACK_DIR/backend/serve_app.py" ]]; then
+        err "backend/serve_app.py missing from the release — cannot start the panel"
+        exit 1
+    fi
 
     chmod +x "$LLSTACK_DIR/scripts"/*/*.sh "$LLSTACK_DIR/scripts"/*.sh 2>/dev/null || true
-    chown -R "$LLSTACK_USER:$LLSTACK_USER" "$LLSTACK_DIR"
+
+    # Ownership: code (backend/scripts/web/config/templates) stays root-owned so the
+    # panel service account cannot rewrite a script that sudoers lets it run as root
+    # — that combination is a privilege-escalation path. Only mutable state is owned
+    # by the panel user. The service itself runs as root, so it can write everywhere.
+    chown -R root:root "$LLSTACK_DIR"
+    chmod 755 "$LLSTACK_DIR"
+    chown -R "$LLSTACK_USER:$LLSTACK_USER" \
+        "$LLSTACK_DIR/data" "$LLSTACK_DIR/logs" "$LLSTACK_DIR/backups"
+    chmod 750 "$LLSTACK_DIR/data" "$LLSTACK_DIR/logs" "$LLSTACK_DIR/backups"
 }
 
 setup_sudoers() {
     log "Configuring sudoers..."
-    # Allow the panel user to run the management scripts as root, both directly and
-    # via `bash script` (llstack-ctl's run_script) and with an env prefix (redis commands).
-    # Without the /usr/bin/bash forms, `sudo bash script` would be DENIED because sudo
-    # matches the command `bash`, not the script path — a silent CLI failure.
+    # A Cmnd listed as a bare path allows any arguments (sudoers semantics), which is
+    # what the management scripts need. Do NOT add `bash <script>` or `env * <script>`
+    # forms: specifying args makes sudo require an exact pattern match (breaking real
+    # arguments), and an `env *` wildcard spans spaces, allowing
+    # `sudo env BASH_ENV=/tmp/x bash <script>` — arbitrary root execution.
+    # llstack-ctl invokes scripts directly (shebang), which matches this rule.
     cat > /etc/sudoers.d/llstack << SUDOEOF
-$LLSTACK_USER ALL=(root) NOPASSWD: $LLSTACK_DIR/scripts/*/*.sh, /usr/bin/bash $LLSTACK_DIR/scripts/*/*.sh, /usr/bin/env * $LLSTACK_DIR/scripts/*/*.sh
+$LLSTACK_USER ALL=(root) NOPASSWD: $LLSTACK_DIR/scripts/*/*.sh
 SUDOEOF
     chmod 440 /etc/sudoers.d/llstack
 }

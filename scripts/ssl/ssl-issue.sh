@@ -65,7 +65,7 @@ if ! "$ACME_HOME/acme.sh" --issue \
     -d "$DOMAIN" \
     -w "$WEBROOT" \
     --keylength ec-256 \
-    2>&1; then
+    >&2 2>&1; then
     # Check if cert already exists (acme.sh returns non-zero for "already issued")
     if [[ ! -f "$CERT_DIR/$DOMAIN/fullchain.pem" ]]; then
         echo '{"ok": false, "error": "cert_issue_failed", "message": "acme.sh --issue failed"}' >&2
@@ -78,7 +78,7 @@ if ! "$ACME_HOME/acme.sh" --install-cert -d "$DOMAIN" --ecc \
     --key-file "$CERT_DIR/$DOMAIN/privkey.pem" \
     --fullchain-file "$CERT_DIR/$DOMAIN/fullchain.pem" \
     --reloadcmd "/usr/local/lsws/bin/lswsctrl reload" \
-    2>&1; then
+    >&2 2>&1; then
     echo '{"ok": false, "error": "cert_install_failed", "message": "acme.sh --install-cert failed"}' >&2
     exit 1
 fi

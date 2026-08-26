@@ -7,6 +7,7 @@ set -euo pipefail
 USER=""
 MAXMEMORY=64
 PASSWORD="${REDIS_PASSWORD:-}"
+PW_FILE=""
 
 # Detect redis-server/redis-cli or valkey equivalents
 REDIS_SERVER_BIN=$(command -v redis-server 2>/dev/null || command -v valkey-server 2>/dev/null || echo "/usr/bin/redis-server")
@@ -14,12 +15,20 @@ REDIS_CLI_BIN=$(command -v redis-cli 2>/dev/null || command -v valkey-cli 2>/dev
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --user)      USER="$2"; shift 2 ;;
-        --maxmemory) MAXMEMORY="$2"; shift 2 ;;
-        --password)  PASSWORD="$2"; shift 2 ;;  # legacy fallback
+        --user)          USER="$2"; shift 2 ;;
+        --maxmemory)     MAXMEMORY="$2"; shift 2 ;;
+        --password)      PASSWORD="$2"; shift 2 ;;  # legacy fallback (visible in ps)
+        --password-file) PW_FILE="$2"; shift 2 ;;
         *) echo '{"ok": false, "error": "unknown_arg"}' >&2; exit 1 ;;
     esac
 done
+
+# Prefer a password file: no ps leak, and no `sudo VAR=x` env prefix (which sudo
+# refuses without a SETENV tag) is needed to reach this script.
+if [[ -n "$PW_FILE" && -f "$PW_FILE" ]]; then
+    PASSWORD=$(cat "$PW_FILE")
+    rm -f -- "$PW_FILE"
+fi
 
 if [[ -z "$USER" || -z "$PASSWORD" ]]; then
     echo '{"ok": false, "error": "missing_args", "message": "--user and REDIS_PASSWORD env required"}' >&2

@@ -30,7 +30,7 @@ case "$ENGINE" in
                 echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
             fi
         else
-            if ! mysql "$NAME" < "$FILE" 2>&1; then
+            if ! mysql "$NAME" < "$FILE" >&2 2>&1; then
                 echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
             fi
         fi
@@ -41,7 +41,7 @@ case "$ENGINE" in
                 echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
             fi
         else
-            if ! sudo -u postgres psql "$NAME" < "$FILE" 2>&1; then
+            if ! sudo -u postgres psql "$NAME" < "$FILE" >&2 2>&1; then
                 echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
             fi
         fi

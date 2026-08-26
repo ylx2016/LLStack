@@ -6,15 +6,23 @@ set -euo pipefail
 
 USER=""
 PASSWORD="${REDIS_PASSWORD:-}"
+PW_FILE=""
 REDIS_CLI_BIN=$(command -v redis-cli 2>/dev/null || command -v valkey-cli 2>/dev/null || echo "redis-cli")
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --user)     USER="$2"; shift 2 ;;
-        --password) PASSWORD="$2"; shift 2 ;;  # legacy fallback
+        --user)          USER="$2"; shift 2 ;;
+        --password)      PASSWORD="$2"; shift 2 ;;  # legacy fallback (visible in ps)
+        --password-file) PW_FILE="$2"; shift 2 ;;
         *) echo '{"ok": false, "error": "unknown_arg"}' >&2; exit 1 ;;
     esac
 done
+
+# Prefer a password file: no ps leak, and no `sudo VAR=x` env prefix needed.
+if [[ -n "$PW_FILE" && -f "$PW_FILE" ]]; then
+    PASSWORD=$(cat "$PW_FILE")
+    rm -f -- "$PW_FILE"
+fi
 
 if [[ -z "$USER" ]]; then
     echo '{"ok": false, "error": "missing_args"}' >&2

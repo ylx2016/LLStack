@@ -185,49 +185,78 @@ phpIniOverride  {
 VHEOF
 }
 
-# 5. Register vhost in httpd_config.conf (if not already there)
-if ! grep -q "virtualhost $DOMAIN" "$LSWS_CONF" 2>/dev/null; then
-    cat >> "$LSWS_CONF" << REGEOF
-
-virtualhost $DOMAIN {
-  vhRoot                  $VHOST_DIR
-  configFile              $VHOST_CONF
-  allowSymbolLink         1
-  enableScript            1
-  restrained              1
-}
-REGEOF
-fi
-
-# 5b. Add listener mapping (map domain to Default listener)
+# 5. Register the vhost and map it onto the Default listener.
+# Both edits happen in one Python pass under the shared httpd_config lock, with
+# anchored+escaped idempotency checks. A substring check like `grep "map.*$DOMAIN"`
+# would treat an existing `map blog.example.com ...` as covering `example.com`
+# and silently skip the map line, leaving the new site unreachable on :80.
 DOMAIN_MAP="$DOMAIN"
 if [[ -n "$ALIASES" ]]; then
     DOMAIN_MAP="$DOMAIN, $ALIASES"
 fi
-# Insert map line into Default listener block
-if ! grep -q "map.*$DOMAIN" "$LSWS_CONF" 2>/dev/null; then
-    # Find the Default listener and add map before the closing }
-    python3 - "$LSWS_CONF" "$DOMAIN" "$DOMAIN_MAP" << 'PYEOF'
+
+HTTPD_LOCK="/var/lock/llstack-httpd-config.lock"
+exec 201>"$HTTPD_LOCK"
+flock -w 10 201 || { echo '{"ok":false,"error":"config_locked"}' >&2; exit 1; }
+
+cp "$LSWS_CONF" "${LSWS_CONF}.llstack.bak"
+
+if ! python3 - "$LSWS_CONF" "$DOMAIN" "$DOMAIN_MAP" "$VHOST_DIR" "$VHOST_CONF" << 'PYEOF'
 import re, sys
-conf_path, domain, domain_map = sys.argv[1], sys.argv[2], sys.argv[3]
+
+conf_path, domain, domain_map, vhost_dir, vhost_conf = sys.argv[1:6]
 with open(conf_path) as f:
     content = f.read()
-pattern = r'(listener Default\s*\{[^}]*)(})'
-replacement = r'\1  map                     ' + domain + ' ' + domain_map + r'\n\2'
-content = re.sub(pattern, replacement, content, count=1)
+orig = content
+esc = re.escape(domain)
+
+# Register the virtualhost block if this exact name is not already declared.
+if not re.search(r'^\s*virtualhost\s+' + esc + r'\s*\{', content, re.M):
+    content = content.rstrip() + f"""
+
+virtualhost {domain} {{
+  vhRoot                  {vhost_dir}
+  configFile              {vhost_conf}
+  allowSymbolLink         1
+  enableScript             1
+  restrained              1
+}}
+"""
+
+# Map the domain onto the Default listener if this exact domain is not mapped.
+m = re.search(r'(listener\s+Default\s*\{)(.*?)(^\})', content, re.DOTALL | re.M)
+if not m:
+    print("no Default listener block found in httpd_config.conf", file=sys.stderr)
+    sys.exit(2)
+block = m.group(2)
+if not re.search(r'^\s*map\s+' + esc + r'(\s|,|$)', block, re.M):
+    block = block.rstrip('\n') + f"\n  map                     {domain} {domain_map}\n"
+    content = content[:m.start(2)] + block + content[m.end(2):]
+
+if content == orig:
+    # Nothing to do (already fully registered) — not an error.
+    sys.exit(0)
+
 with open(conf_path, 'w') as f:
     f.write(content)
 PYEOF
+then
+    mv "${LSWS_CONF}.llstack.bak" "$LSWS_CONF"
+    echo '{"ok":false,"error":"httpd_config_update_failed","message":"Could not register vhost/listener map; config restored"}' >&2
+    exit 1
 fi
+rm -f "${LSWS_CONF}.llstack.bak"
 
-# 6. Create log files
+# 6. Create log files and the LSCache storage dir the template references
 touch "/usr/local/lsws/logs/$DOMAIN.access.log" "/usr/local/lsws/logs/$DOMAIN.error.log"
 chmod 640 "/usr/local/lsws/logs/$DOMAIN.access.log" "/usr/local/lsws/logs/$DOMAIN.error.log"
+mkdir -p "/usr/local/lsws/cachedata/$DOMAIN"
+chown nobody:nobody "/usr/local/lsws/cachedata/$DOMAIN" 2>/dev/null || true
+chmod 755 "/usr/local/lsws/cachedata/$DOMAIN"
 
-# 7. Validate and reload
-if true; then  # lswsctrl has no configtest — reload unconditionally
-    /usr/local/lsws/bin/lswsctrl reload &>/dev/null || true
-fi
+# 7. Reload (lswsctrl has no configtest; adding a vhost to an existing listener
+# takes effect on reload)
+/usr/local/lsws/bin/lswsctrl reload &>/dev/null || true
 
 cat << EOF
 {"ok": true, "data": {"domain": "$DOMAIN", "doc_root": "$DOC_ROOT", "vhost_conf": "$VHOST_CONF", "php_version": "$PHP_VERSION"}}

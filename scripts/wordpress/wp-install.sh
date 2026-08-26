@@ -54,12 +54,12 @@ fi
 # Ensure directory exists
 mkdir -p "$PATH_ARG"
 
-echo ">>> Downloading WordPress..."
+echo ">>> Downloading WordPress..." >&2
 $WP_CLI core download --path="$PATH_ARG" --locale="$LOCALE" --allow-root 2>&1 || true
 
 # Generate wp-config.php if DB info provided
 if [[ -n "$DB_NAME" && -n "$DB_USER" ]]; then
-    echo ">>> Configuring wp-config.php..."
+    echo ">>> Configuring wp-config.php..." >&2
     # Write DB password via prompt stdin to avoid /proc exposure
     $WP_CLI config create \
         --path="$PATH_ARG" \
@@ -68,10 +68,10 @@ if [[ -n "$DB_NAME" && -n "$DB_USER" ]]; then
         --dbhost="$DB_HOST" \
         --allow-root \
         --skip-check \
-        --prompt=dbpass <<< "$DB_PASS" 2>&1
+        --prompt=dbpass <<< "$DB_PASS" >&2 2>&1
 fi
 
-echo ">>> Installing WordPress..."
+echo ">>> Installing WordPress..." >&2
 # Write admin password via temp file to avoid /proc exposure
 ADMIN_PW_TMP=$(mktemp /tmp/.wp_admin_pw.XXXXXXXXXX)
 chmod 600 "$ADMIN_PW_TMP"
@@ -84,7 +84,7 @@ $WP_CLI core install \
     --admin_email="$ADMIN_EMAIL" \
     --allow-root \
     --skip-email \
-    --prompt=admin_password < "$ADMIN_PW_TMP" 2>&1
+    --prompt=admin_password < "$ADMIN_PW_TMP" >&2 2>&1
 rm -f "$ADMIN_PW_TMP"
 
 # Get installed version
@@ -94,7 +94,7 @@ VERSION=$($WP_CLI core version --path="$PATH_ARG" --allow-root 2>/dev/null || ec
 SITE_USER=$(stat -c '%U' "$(dirname "$PATH_ARG")" 2>/dev/null || echo "root")
 chown -R "$SITE_USER:$SITE_USER" "$PATH_ARG" 2>/dev/null || true
 
-echo ">>> WordPress installed successfully!"
+echo ">>> WordPress installed successfully!" >&2
 cat << EOF
 {"ok":true,"data":{"path":"$PATH_ARG","url":"$URL","version":"$VERSION","admin_user":"$ADMIN_USER"}}
 EOF

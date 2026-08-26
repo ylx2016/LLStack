@@ -2,11 +2,14 @@
 set -euo pipefail
 
 # LLStack Panel Upgrade Script
-# Usage: upgrade.sh [--version <tag>]
+# Usage: upgrade.sh [--version <tag>] [--dev] [--force-downgrade]
 
 LLSTACK_DIR="/opt/llstack"
 LLSTACK_REPO="https://github.com/web-casa/LLStack"
 TARGET_VERSION=""
+USE_DEV=false
+FORCE_DOWNGRADE=false
+KEEP_BACKUPS=3
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -17,8 +20,10 @@ err()  { echo -e "${RED}[ERROR]${NC} $*" >&2; }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --version) TARGET_VERSION="$2"; shift 2 ;;
-        *) shift ;;
+        --version)          TARGET_VERSION="$2"; shift 2 ;;
+        --dev)              USE_DEV=true; shift ;;
+        --force-downgrade)  FORCE_DOWNGRADE=true; shift ;;
+        *) err "Unknown argument: $1"; exit 1 ;;
     esac
 done
 
@@ -34,91 +39,196 @@ if [[ ! -d "$LLSTACK_DIR" ]]; then
     exit 1
 fi
 
-log "Starting upgrade..."
-
-# 1. Backup current installation
-BACKUP_DIR="/opt/llstack-backup-$(date +%Y%m%d%H%M%S)"
-log "Backing up to $BACKUP_DIR..."
-cp -r "$LLSTACK_DIR/backend" "$BACKUP_DIR-backend"
-cp -r "$LLSTACK_DIR/data" "$BACKUP_DIR-data"
-
-# 2. Download new version
-log "Downloading new version..."
-if [[ -d "/opt/llstack-panel" ]]; then
-    # Dev mode: copy from local
-    log "Dev mode: syncing from /opt/llstack-panel"
-    # Clean old backend app/ to prevent .py shadowing compiled .so
-    rm -rf "$LLSTACK_DIR/backend/app"
-    rsync -a --exclude 'node_modules' --exclude '.venv' --exclude '__pycache__' --exclude 'dist' \
-        /opt/llstack-panel/backend/ "$LLSTACK_DIR/backend/"
-    rsync -a --exclude 'node_modules' --exclude 'dist' \
-        /opt/llstack-panel/web/ "$LLSTACK_DIR/web/"
-    rsync -a /opt/llstack-panel/scripts/ "$LLSTACK_DIR/scripts/"
-else
-    # Production: git pull or clone
-    TMPDIR=$(mktemp -d)
-    if [[ -n "$TARGET_VERSION" ]]; then
-        git clone --depth 1 --branch "$TARGET_VERSION" "$LLSTACK_REPO" "$TMPDIR" 2>&1 | tail -1
-    else
-        git clone --depth 1 "$LLSTACK_REPO" "$TMPDIR" 2>&1 | tail -1
-    fi
-    # Clean old backend app/ to prevent .py shadowing compiled .so
-    rm -rf "$LLSTACK_DIR/backend/app"
-    rsync -a "$TMPDIR/backend/" "$LLSTACK_DIR/backend/"
-    rsync -a "$TMPDIR/web/" "$LLSTACK_DIR/web/"
-    rsync -a "$TMPDIR/scripts/" "$LLSTACK_DIR/scripts/"
-    # Copy VERSION, versions.json, templates, config
-    cp "$TMPDIR/VERSION" "$LLSTACK_DIR/VERSION" 2>/dev/null || true
-    cp "$TMPDIR/versions.json" "$LLSTACK_DIR/versions.json" 2>/dev/null || true
-    rsync -a "$TMPDIR/templates/" "$LLSTACK_DIR/templates/" 2>/dev/null || true
-    rsync -a "$TMPDIR/config/" "$LLSTACK_DIR/config/" 2>/dev/null || true
-    rm -rf "$TMPDIR"
+# Dev mode must be explicit: a leftover /opt/llstack-panel must never silently
+# override an explicitly requested --version.
+if [[ "$USE_DEV" == true && ! -d "/opt/llstack-panel" ]]; then
+    err "--dev requested but /opt/llstack-panel does not exist"
+    exit 1
+fi
+if [[ "$USE_DEV" == true && -n "$TARGET_VERSION" ]]; then
+    err "--dev and --version are mutually exclusive"
+    exit 1
 fi
 
-# 3. Update Python dependencies
-log "Updating Python dependencies..."
-"$LLSTACK_DIR/backend/.venv/bin/pip" install -q -r "$LLSTACK_DIR/backend/requirements.txt" 2>&1 | tail -1
+CURRENT_VER=$(cat "$LLSTACK_DIR/VERSION" 2>/dev/null || echo "0.0.0")
 
-# 4. Frontend — pre-built dist/ included in release
+# Refuse to install an older release over a migrated schema (migrations are one-way).
+ver_lt() { [[ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -1)" == "$1" && "$1" != "$2" ]]; }
+if [[ -n "$TARGET_VERSION" && "$FORCE_DOWNGRADE" != true ]]; then
+    TGT="${TARGET_VERSION#v}"
+    if ver_lt "$TGT" "$CURRENT_VER"; then
+        err "Refusing to downgrade $CURRENT_VER -> $TGT (migrations are one-way). Use --force-downgrade to override."
+        exit 1
+    fi
+fi
+MIN_VER=$(python3 -c "import json;print(json.load(open('$LLSTACK_DIR/versions.json')).get('min_upgrade_version',''))" 2>/dev/null || echo "")
+if [[ -n "$MIN_VER" ]] && ver_lt "$CURRENT_VER" "$MIN_VER"; then
+    err "Installed version $CURRENT_VER is below min_upgrade_version $MIN_VER — upgrade in steps or reinstall."
+    exit 1
+fi
+
+# Disk space precheck (a failed half-upgrade is far worse than refusing to start)
+AVAIL_MB=$(df -BM --output=avail /opt 2>/dev/null | tail -1 | tr -dc '0-9')
+if [[ -n "$AVAIL_MB" && "$AVAIL_MB" -lt 1024 ]]; then
+    err "Less than 1GB free on /opt (${AVAIL_MB}MB) — aborting"
+    exit 1
+fi
+
+log "Starting upgrade from $CURRENT_VER..."
+
+# ── 1. Backup everything the upgrade overwrites ──
+# .venv is rebuilt from requirements.txt and backups/ is the backup target itself.
+BACKUP_DIR="/opt/llstack-backup-$(date +%Y%m%d%H%M%S)"
+log "Backing up to $BACKUP_DIR..."
+mkdir -p "$BACKUP_DIR"
+chmod 700 "$BACKUP_DIR"
+rsync -a --exclude '.venv' --exclude 'backups/' --exclude '__pycache__' \
+    "$LLSTACK_DIR/" "$BACKUP_DIR/"
+# WAL-safe copy of the live panel database
+if [[ -f "$LLSTACK_DIR/data/llstack.db" ]]; then
+    sqlite3 "$LLSTACK_DIR/data/llstack.db" ".backup '$BACKUP_DIR/data/llstack.db'" 2>/dev/null || true
+fi
+
+restore_hint() {
+    err "Restore with:"
+    err "  systemctl stop llstack"
+    err "  rsync -a --delete --exclude '.venv' --exclude 'backups/' $BACKUP_DIR/ $LLSTACK_DIR/"
+    err "  systemctl start llstack"
+}
+
+# ── 2. Fetch the new version ──
+log "Downloading new version..."
+if [[ "$USE_DEV" == true ]]; then
+    log "Dev mode: syncing from /opt/llstack-panel"
+    SRC="/opt/llstack-panel"
+else
+    SRC=$(mktemp -d)
+    # shellcheck disable=SC2064
+    trap "rm -rf '$SRC'" EXIT
+    if [[ -n "$TARGET_VERSION" ]]; then
+        git clone --depth 1 --branch "$TARGET_VERSION" "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
+    else
+        git clone --depth 1 "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
+    fi
+    if [[ ! -f "$SRC/VERSION" ]]; then
+        err "Downloaded tree has no VERSION file — aborting"
+        exit 1
+    fi
+fi
+
+# Stage backend/app into a new dir and swap atomically, so an interrupted sync
+# can't leave migrations/ missing (which makes the panel unbootable).
+if [[ -d "$SRC/backend/app" ]]; then
+    rm -rf "$LLSTACK_DIR/backend/app.new"
+    rsync -a "$SRC/backend/app/" "$LLSTACK_DIR/backend/app.new/"
+    rm -rf "$LLSTACK_DIR/backend/app"
+    mv "$LLSTACK_DIR/backend/app.new" "$LLSTACK_DIR/backend/app"
+fi
+
+# --delete on code trees: without it, scripts removed upstream stay on disk and
+# keep matching the sudoers wildcard, and stale web/dist chunks accumulate.
+rsync -a --delete --exclude 'node_modules' --exclude '.venv' --exclude '__pycache__' \
+    --exclude 'app/' --exclude 'app.new/' \
+    "$SRC/backend/" "$LLSTACK_DIR/backend/"
+rsync -a --delete --exclude 'node_modules' "$SRC/web/" "$LLSTACK_DIR/web/"
+rsync -a --delete "$SRC/scripts/" "$LLSTACK_DIR/scripts/"
+[[ -d "$SRC/templates" ]] && rsync -a --delete "$SRC/templates/" "$LLSTACK_DIR/templates/"
+[[ -d "$SRC/config" ]] && rsync -a --delete "$SRC/config/" "$LLSTACK_DIR/config/"
+# VERSION / versions.json in BOTH modes, or version-check reports stale forever
+cp "$SRC/VERSION" "$LLSTACK_DIR/VERSION" 2>/dev/null || true
+cp "$SRC/versions.json" "$LLSTACK_DIR/versions.json" 2>/dev/null || true
+
+# ── 3. Python dependencies ──
+log "Updating Python dependencies..."
+if ! "$LLSTACK_DIR/backend/.venv/bin/pip" install -q -r "$LLSTACK_DIR/backend/requirements.txt"; then
+    err "pip install failed"
+    restore_hint
+    exit 1
+fi
+
+# ── 4. Frontend is pre-built ──
 log "Frontend dist/ updated (no build needed)"
 
-# 5. Run database migrations
+# ── 5. Database migrations ──
+# Migrations run inside create_app(); a partially-applied multi-statement migration
+# is not recorded and will re-run on next boot, so keep the pre-migration DB copy.
 log "Running migrations..."
 cd "$LLSTACK_DIR/backend"
-LLSTACK_DB_PATH="$LLSTACK_DIR/data/llstack.db" .venv/bin/python -c "
+if ! LLSTACK_DB_PATH="$LLSTACK_DIR/data/llstack.db" .venv/bin/python -c "
 from app import create_app
-app = create_app({'TURSO_DB_PATH': '$LLSTACK_DIR/data/llstack.db'})
+create_app()
 print('Migrations applied')
-"
+"; then
+    err "Database migration FAILED — the panel may not start."
+    err "Pre-migration database: $BACKUP_DIR/data/llstack.db"
+    restore_hint
+    exit 1
+fi
 
-# 6. Fix permissions
-chown -R llstack:llstack "$LLSTACK_DIR"
+# ── 6. Permissions ──
+# Keep code root-owned so the service account can't rewrite a script that sudoers
+# lets it run as root; only mutable state belongs to the panel user.
+chown -R root:root "$LLSTACK_DIR"
+chmod 755 "$LLSTACK_DIR"
+chown -R llstack:llstack "$LLSTACK_DIR/data" "$LLSTACK_DIR/logs" "$LLSTACK_DIR/backups" 2>/dev/null || true
+chmod 750 "$LLSTACK_DIR/data" "$LLSTACK_DIR/logs" "$LLSTACK_DIR/backups" 2>/dev/null || true
 chmod +x "$LLSTACK_DIR/scripts"/*/*.sh 2>/dev/null || true
+chmod +x "$LLSTACK_DIR/scripts"/*.sh 2>/dev/null || true
 chmod +x "$LLSTACK_DIR/scripts/llstack-ctl" 2>/dev/null || true
 ln -sf "$LLSTACK_DIR/scripts/llstack-ctl" /usr/local/bin/llstack-ctl 2>/dev/null || true
 
-# 7. Restart service
+# ── 7. Restart ──
+# If we were spawned by the panel itself (gunicorn inside llstack.service), a
+# synchronous `systemctl restart` would SIGTERM this script via the unit's cgroup.
+# Queue the restart instead and let systemd do it after we exit.
+IN_UNIT=false
+grep -q 'llstack\.service' /proc/self/cgroup 2>/dev/null && IN_UNIT=true
+
+if [[ "$IN_UNIT" == true ]]; then
+    log "Running inside llstack.service — queueing restart (verification deferred)"
+    systemctl restart llstack --no-block 2>/dev/null || true
+    NEW_VER=$(cat "$LLSTACK_DIR/VERSION" 2>/dev/null || echo "unknown")
+    log "Upgrade staged! Version: $NEW_VER (service restart queued)"
+    log "Backup saved at: $BACKUP_DIR"
+    exit 0
+fi
+
 log "Restarting LLStack..."
-systemctl restart llstack 2>/dev/null || {
-    # If systemd service doesn't exist, restart gunicorn
+if systemctl list-unit-files llstack.service &>/dev/null && \
+   systemctl cat llstack.service &>/dev/null; then
+    systemctl restart llstack
+else
+    # No systemd unit — fall back to a bare gunicorn
     pkill -f "gunicorn.*serve_app" 2>/dev/null || true
     sleep 1
     cd "$LLSTACK_DIR/backend"
     LLSTACK_DB_PATH="$LLSTACK_DIR/data/llstack.db" \
         .venv/bin/gunicorn -w 1 --threads 4 -b 127.0.0.1:8001 serve_app:app --daemon \
         --log-file /var/log/llstack.log --timeout 120
-}
+fi
 
-sleep 3
+# ── 8. Verify via the health endpoint (works for both start methods) ──
+HEALTHY=false
+for _ in $(seq 1 15); do
+    sleep 1
+    if curl -sf --max-time 3 http://127.0.0.1:8001/api/health 2>/dev/null | grep -q '"db"'; then
+        HEALTHY=true
+        break
+    fi
+done
 
-# 8. Verify — check service is running, not HTTP response (serve_app returns HTML for all paths)
-if systemctl is-active llstack &>/dev/null; then
+if [[ "$HEALTHY" == true ]]; then
     NEW_VER=$(cat "$LLSTACK_DIR/VERSION" 2>/dev/null || echo "unknown")
     log "Upgrade complete! Version: $NEW_VER"
-    log "Backup saved at: $BACKUP_DIR-*"
+    log "Backup saved at: $BACKUP_DIR"
+    # Prune old upgrade backups
+    # shellcheck disable=SC2012
+    ls -1dt /opt/llstack-backup-* 2>/dev/null | tail -n +$((KEEP_BACKUPS + 1)) | while read -r old; do
+        rm -rf "$old"
+    done
 else
-    err "Upgrade may have failed. LLStack service not running."
+    err "Upgrade may have failed — /api/health did not respond."
     err "Check: journalctl -u llstack --no-pager -n 30"
-    err "Restore backup: rm -rf $LLSTACK_DIR/backend && cp -r $BACKUP_DIR-backend/. $LLSTACK_DIR/backend/ && rm -rf $LLSTACK_DIR/data && cp -r $BACKUP_DIR-data/. $LLSTACK_DIR/data/"
+    restore_hint
     exit 1
 fi

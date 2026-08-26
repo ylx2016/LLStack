@@ -57,6 +57,6 @@ if [[ -f database.sql.gz ]]; then
 fi
 # Restore metadata if present
 if [[ -f metadata.json ]]; then
-    echo ">>> Metadata found in backup"
+    echo ">>> Metadata found in backup" >&2
 fi
 echo '{"ok":true,"data":{"restored":true}}'

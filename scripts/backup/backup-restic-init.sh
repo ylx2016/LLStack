@@ -28,6 +28,6 @@ if restic -r "$REPO" --password-file "$PW_FILE" snapshots &>/dev/null; then
     exit 0
 fi
 
-restic init -r "$REPO" --password-file "$PW_FILE" 2>&1
+restic init -r "$REPO" --password-file "$PW_FILE" >&2 2>&1
 
 echo '{"ok":true,"data":{"status":"initialized","repo":"'"$REPO"'"}}'

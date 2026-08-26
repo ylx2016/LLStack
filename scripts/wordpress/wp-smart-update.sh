@@ -28,7 +28,7 @@ for p in /usr/local/bin/wp /usr/bin/wp; do [[ -x "$p" ]] && { WP_CLI="$p"; break
 CLONE_DIR=$(mktemp -d "/tmp/llstack-smart-update.XXXXXXXXXX")
 trap 'rm -rf "$CLONE_DIR"' EXIT
 
-echo ">>> Step 1: Cloning site to $CLONE_DIR..."
+echo ">>> Step 1: Cloning site to $CLONE_DIR..." >&2
 cp -a "$WP_PATH/." "$CLONE_DIR/"
 
 # Clone database
@@ -45,7 +45,7 @@ if ! echo "$CLONE_DB" | grep -qP '^[a-zA-Z_][a-zA-Z0-9_]{0,63}$'; then
     CLONE_DB="su_clone_$(date +%s)"
 fi
 
-echo ">>> Cloning database $DB_NAME → $CLONE_DB..."
+echo ">>> Cloning database $DB_NAME → $CLONE_DB..." >&2
 mysql -e "CREATE DATABASE IF NOT EXISTS \`$CLONE_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null
 mysqldump --single-transaction --quick "$DB_NAME" 2>/dev/null | mysql "$CLONE_DB" 2>/dev/null
 
@@ -56,7 +56,7 @@ if [[ -n "$DB_USER" ]] && echo "$DB_USER" | grep -qP '^[a-zA-Z][a-zA-Z0-9_]{0,31
 fi
 
 # Point clone to cloned DB
-$WP_CLI config set DB_NAME "$CLONE_DB" --path="$CLONE_DIR" --allow-root 2>/dev/null
+$WP_CLI config set DB_NAME "$CLONE_DB" --path="$CLONE_DIR" --allow-root >&2 2>/dev/null
 
 # Update cleanup trap to also drop clone DB
 cleanup() {
@@ -66,7 +66,7 @@ cleanup() {
 trap cleanup EXIT INT TERM HUP
 
 # Step 2: Capture pre-update state
-echo ">>> Step 2: Capturing pre-update state..."
+echo ">>> Step 2: Capturing pre-update state..." >&2
 PRE_VERSION=""
 case "$UPDATE_TYPE" in
     core)
@@ -81,7 +81,7 @@ case "$UPDATE_TYPE" in
 esac
 
 # Step 3: Apply update on clone
-echo ">>> Step 3: Applying update on clone..."
+echo ">>> Step 3: Applying update on clone..." >&2
 UPDATE_OUTPUT=""
 UPDATE_EXIT=0
 case "$UPDATE_TYPE" in
@@ -95,10 +95,10 @@ case "$UPDATE_TYPE" in
         UPDATE_OUTPUT=$($WP_CLI theme update --path="$CLONE_DIR" --allow-root -- "$SLUG" 2>&1) || UPDATE_EXIT=$?
         ;;
 esac
-echo "$UPDATE_OUTPUT"
+echo "$UPDATE_OUTPUT" >&2
 
 # Step 4: Check for errors
-echo ">>> Step 4: Running post-update checks..."
+echo ">>> Step 4: Running post-update checks..." >&2
 ERRORS=()
 
 # Check 4a: PHP fatal errors
@@ -106,9 +106,9 @@ PHP_EXIT=0
 PHP_CHECK=$($WP_CLI eval "echo 'PHP_OK';" --path="$CLONE_DIR" --allow-root 2>&1) || PHP_EXIT=$?
 if [[ "$PHP_EXIT" -ne 0 || "$PHP_CHECK" != *"PHP_OK"* ]]; then
     ERRORS+=("php_fatal_error")
-    echo "  [FAIL] PHP fatal error detected"
+    echo "  [FAIL] PHP fatal error detected" >&2
 else
-    echo "  [OK] PHP execution"
+    echo "  [OK] PHP execution" >&2
 fi
 
 # Check 4b: WP core loads without errors
@@ -116,9 +116,9 @@ WP_EXIT=0
 WP_CHECK=$($WP_CLI core is-installed --path="$CLONE_DIR" --allow-root 2>&1) || WP_EXIT=$?
 if [[ "$WP_EXIT" -ne 0 ]]; then
     ERRORS+=("wp_core_broken")
-    echo "  [FAIL] WordPress core check failed"
+    echo "  [FAIL] WordPress core check failed" >&2
 else
-    echo "  [OK] WordPress core"
+    echo "  [OK] WordPress core" >&2
 fi
 
 # Check 4c: Database connectivity
@@ -126,9 +126,9 @@ DB_EXIT=0
 DB_CHECK=$($WP_CLI db check --path="$CLONE_DIR" --allow-root 2>&1) || DB_EXIT=$?
 if [[ "$DB_EXIT" -ne 0 ]] || echo "$DB_CHECK" | grep -qi "error"; then
     ERRORS+=("database_error")
-    echo "  [FAIL] Database check error"
+    echo "  [FAIL] Database check error" >&2
 else
-    echo "  [OK] Database"
+    echo "  [OK] Database" >&2
 fi
 
 # Check 4d: Get post-update version
@@ -146,7 +146,7 @@ case "$UPDATE_TYPE" in
 esac
 
 # Step 5: Cleanup clone database
-echo ">>> Step 5: Cleaning up clone..."
+echo ">>> Step 5: Cleaning up clone..." >&2
 mysql -e "DROP DATABASE IF EXISTS \`$CLONE_DB\`;" 2>/dev/null || true
 
 # Build error JSON array
@@ -155,7 +155,7 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
     ERROR_JSON=$(printf '%s\n' "${ERRORS[@]}" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read().strip().split('\n')))")
 fi
 
-echo ">>> Smart Update check complete."
+echo ">>> Smart Update check complete." >&2
 cat << EOF
 {"ok":true,"data":{
   "update_type":"$UPDATE_TYPE",

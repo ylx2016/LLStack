@@ -30,7 +30,7 @@ case "$ENGINE" in
     mariadb|mysql)
         if [[ "$ACTION" == "fix-definers" ]]; then
             # Fix definers in views, routines, triggers, events
-            echo ">>> Fixing definers in $NAME..."
+            echo ">>> Fixing definers in $NAME..." >&2
 
             # Get first valid user for this database (NAME already validated by regex)
             DB_USER=$(mysql -N -e "SELECT DISTINCT User FROM mysql.db WHERE Db='$NAME' LIMIT 1" 2>/dev/null || echo "")
@@ -49,7 +49,7 @@ case "$ENGINE" in
                 [[ -z "$view" ]] && continue
                 # Escape backticks in view name for safe SQL interpolation
                 safe_view="${view//\`/\`\`}"
-                echo "  Fixing view: $view"
+                echo "  Fixing view: $view" >&2
                 VIEW_SQL=$(mysqldump --no-data --routines=false --triggers=false --skip-add-drop-table \
                     --no-create-info "$NAME" --where="1=0" 2>/dev/null | grep -A999 "CREATE.*VIEW" | head -20)
                 if [[ -n "$VIEW_SQL" ]]; then
@@ -63,13 +63,13 @@ case "$ENGINE" in
                 mysql -N -e "SELECT ROUTINE_NAME FROM INFORMATION_SCHEMA.ROUTINES WHERE ROUTINE_SCHEMA='$NAME' AND ROUTINE_TYPE='$RTYPE'" 2>/dev/null | while IFS= read -r routine; do
                     [[ -z "$routine" ]] && continue
                     safe_routine="${routine//\`/\`\`}"
-                    echo "  Fixing $RTYPE: $routine"
+                    echo "  Fixing $RTYPE: $routine" >&2
                     mysql "$NAME" -e "ALTER $RTYPE \`$safe_routine\` SQL SECURITY DEFINER" 2>/dev/null || \
-                    echo "  WARNING: ALTER $RTYPE failed for $routine (may need manual fix)"
+                    echo "  WARNING: ALTER $RTYPE failed for $routine (may need manual fix)" >&2
                 done
             done
 
-            echo "[fix-definers completed]"
+            echo "[fix-definers completed]" >&2
             echo '{"ok":true,"data":{"action":"fix-definers","definer":"'"$DEFINER"'"}}'
         else
             # Get all tables
@@ -80,43 +80,45 @@ case "$ENGINE" in
             TABLE_COUNT=0
             ERRORS=0
 
-            # Use a here-string (not a pipe) so the loop runs in the current shell
-            # and the TABLE_COUNT/ERRORS counters persist to the final output.
-            while IFS= read -r table <<< "$TABLES"; do
+            # Feed the loop from a here-string on `done` (NOT on `read`, which would
+            # re-open it every iteration and loop forever on the first line) so the
+            # loop runs in the current shell and the counters persist to the output.
+            # Progress goes to stderr so stdout stays parseable JSON.
+            while IFS= read -r table; do
                 [[ -z "$table" ]] && continue
                 safe_table="${table//\`/\`\`}"
-                echo ">>> $SQL_ACTION TABLE \`$NAME\`.\`$safe_table\`"
+                echo ">>> $SQL_ACTION TABLE \`$NAME\`.\`$safe_table\`" >&2
                 RESULT=$(mysql -e "$SQL_ACTION TABLE \`$NAME\`.\`$safe_table\`" 2>&1) || true
-                echo "$RESULT"
+                echo "$RESULT" >&2
                 if echo "$RESULT" | grep -qi "error"; then
                     ERRORS=$((ERRORS + 1))
                 fi
                 TABLE_COUNT=$((TABLE_COUNT + 1))
-            done
+            done <<< "$TABLES"
 
-            echo "[${ACTION} completed: ${TABLE_COUNT} tables, ${ERRORS} errors]"
+            echo "[${ACTION} completed: ${TABLE_COUNT} tables, ${ERRORS} errors]" >&2
             echo "{\"ok\":true,\"data\":{\"action\":\"$ACTION\",\"tables\":$TABLE_COUNT,\"errors\":$ERRORS}}"
         fi
         ;;
     postgresql)
         case "$ACTION" in
             check)
-                echo ">>> Running ANALYZE on $NAME..."
-                sudo -u postgres psql "$NAME" -c "ANALYZE VERBOSE;" 2>&1
+                echo ">>> Running ANALYZE on $NAME..." >&2
+                sudo -u postgres psql "$NAME" -c "ANALYZE VERBOSE;" >&2 2>&1
                 echo '{"ok":true,"data":{"action":"analyze"}}'
                 ;;
             optimize)
-                echo ">>> Running VACUUM ANALYZE on $NAME..."
-                sudo -u postgres psql "$NAME" -c "VACUUM ANALYZE;" 2>&1
+                echo ">>> Running VACUUM ANALYZE on $NAME..." >&2
+                sudo -u postgres psql "$NAME" -c "VACUUM ANALYZE;" >&2 2>&1
                 echo '{"ok":true,"data":{"action":"vacuum_analyze"}}'
                 ;;
             repair)
-                echo ">>> Running REINDEX on $NAME..."
-                sudo -u postgres psql "$NAME" -c "REINDEX DATABASE \"$NAME\";" 2>&1
+                echo ">>> Running REINDEX on $NAME..." >&2
+                sudo -u postgres psql "$NAME" -c "REINDEX DATABASE \"$NAME\";" >&2 2>&1
                 echo '{"ok":true,"data":{"action":"reindex"}}'
                 ;;
             fix-definers)
-                echo "PostgreSQL does not use definers"
+                echo "PostgreSQL does not use definers" >&2
                 echo '{"ok":true,"data":{"action":"fix-definers","message":"not_applicable"}}'
                 ;;
         esac

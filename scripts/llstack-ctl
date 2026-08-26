@@ -28,7 +28,9 @@ trap cleanup_tmp EXIT
 run_script() {
     local script_path="$SCRIPTS_DIR/$1/$2"; shift 2
     [[ ! -f "$script_path" ]] && { error "Script not found: $script_path"; return 1; }
-    sudo bash "$script_path" "$@"
+    # Invoke the script directly (shebang) so it matches the sudoers `*.sh` rule exactly.
+    # Using `sudo bash script` would fail sudo's command matching unless the rule lists bash.
+    sudo "$script_path" "$@"
 }
 
 write_pw_file() {
@@ -255,14 +257,19 @@ cmd_redis() {
             [[ -z "$user" || -z "$password" ]] && { echo "Usage: llstack-ctl redis create --user <u> --password <p> [--maxmemory 64]"; return 1; }
             info "Creating Redis instance for $user..."
             local pw_file; pw_file=$(write_pw_file "$password")
-            sudo REDIS_PASSWORD="$(cat "$pw_file")" bash "$SCRIPTS_DIR/redis/redis-instance-create.sh" --user "$user" --maxmemory "$maxmem"
+            run_script redis redis-instance-create.sh --user "$user" --maxmemory "$maxmem" --password-file "$pw_file"
             info "Redis instance created"
             ;;
         status)
             local user="" password=""
             while [[ $# -gt 0 ]]; do case "$1" in --user) need_arg "$@"; user="$2"; shift 2 ;; --password) need_arg "$@"; password="$2"; shift 2 ;; *) error "Unknown option: $1"; return 1 ;; esac; done
             [[ -z "$user" ]] && { echo "Usage: llstack-ctl redis status --user <u> [--password <p>]"; return 1; }
-            sudo --preserve-env=REDIS_PASSWORD REDIS_PASSWORD="${password:-}" bash "$SCRIPTS_DIR/redis/redis-instance-status.sh" --user "$user"
+            if [[ -n "$password" ]]; then
+                local pw_file; pw_file=$(write_pw_file "$password")
+                run_script redis redis-instance-status.sh --user "$user" --password-file "$pw_file"
+            else
+                run_script redis redis-instance-status.sh --user "$user"
+            fi
             ;;
         control)
             local user="" action=""
@@ -357,6 +364,8 @@ cmd_backup() {
             while [[ $# -gt 0 ]]; do case "$1" in --site) need_arg "$@"; site="$2"; shift 2 ;; --type) need_arg "$@"; type="$2"; shift 2 ;; --output) need_arg "$@"; output="$2"; shift 2 ;; *) error "Unknown option: $1"; return 1 ;; esac; done
             [[ -z "$site" ]] && { echo "Usage: llstack-ctl backup create --site <domain> [--type full|files|db]"; return 1; }
             [[ "$type" =~ ^(full|files|db)$ ]] || { error "Invalid type: $type"; return 1; }
+            # Validate site is a plain hostname/path-safe token before embedding it in a path.
+            [[ "$site" =~ ^[a-zA-Z0-9.-]+$ ]] || { error "Invalid site: $site"; return 1; }
             [[ -z "$output" ]] && output="/opt/llstack/backups/${site}_${type}_$(date +%s).tar.gz"
             info "Creating $type backup for $site..."
             run_script backup backup-create.sh --site "$site" --type "$type" --output "$output"

@@ -96,7 +96,7 @@ if [[ "$TYPE" == "full" || "$TYPE" == "db" ]]; then
                 echo "    WARNING: database dump failed for $DB_NAME (skipping DB, files still backed up)" >&2
                 rm -f "$TMPDIR/database.sql.gz"
             else
-                echo "    Database backed up: $DB_NAME"
+                echo "    Database backed up: $DB_NAME" >&2
                 # Record the actual DB name so restore doesn't have to guess
                 echo "{\"db_name\": \"$DB_NAME\"}" > "$TMPDIR/metadata.json"
                 HAS_CONTENT=true

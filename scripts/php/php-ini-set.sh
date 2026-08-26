@@ -8,6 +8,11 @@ while [[ $# -gt 0 ]]; do case "$1" in --version) VERSION="$2"; shift 2 ;; --key)
 [[ "$KEY" =~ ^[a-zA-Z_][a-zA-Z0-9_.]*$ ]] || { echo '{"ok":false,"error":"invalid_key"}' >&2; exit 1; }
 INI="/etc/opt/remi/php${VERSION}/php.ini"
 [[ ! -f "$INI" ]] && { echo '{"ok":false,"error":"ini_not_found"}' >&2; exit 1; }
+# Reject control characters in VALUE (incl. newline, which grep is line-oriented and would
+# miss) to prevent injection of extra directives into php.ini.
+if [[ "$VALUE" =~ $'\n' ]] || printf '%s' "$VALUE" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo '{"ok":false,"error":"invalid_value"}' >&2; exit 1
+fi
 # Escape sed replacement chars in VALUE (| is our delimiter; \ and & are sed-special)
 ESC_VALUE=$(printf '%s' "$VALUE" | sed -e 's/[|\\&]/\\&/g')
 if grep -q "^${KEY}\s*=" "$INI"; then

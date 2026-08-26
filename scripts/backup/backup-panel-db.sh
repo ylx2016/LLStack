@@ -20,9 +20,9 @@ sqlite3 "$DB_PATH" ".backup '$BACKUP_FILE'" 2>/dev/null
 
 if [[ -f "$BACKUP_FILE" ]]; then
     chmod 600 "$BACKUP_FILE"
-    echo "Panel DB backed up: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)"
+    echo "Panel DB backed up: $BACKUP_FILE ($(stat -c%s "$BACKUP_FILE") bytes)" >&2
 else
-    echo "Backup failed"
+    echo "Backup failed" >&2
     exit 1
 fi
 

@@ -33,8 +33,8 @@ fi
 
 mkdir -p "$TARGET"
 
-echo ">>> Restoring snapshot $SNAPSHOT to $TARGET..."
-restic -r "$REPO" --password-file "$PW_FILE" restore "$SNAPSHOT" --target "$TARGET" "${EXTRA_ARGS[@]}" 2>&1
+echo ">>> Restoring snapshot $SNAPSHOT to $TARGET..." >&2
+restic -r "$REPO" --password-file "$PW_FILE" restore "$SNAPSHOT" --target "$TARGET" "${EXTRA_ARGS[@]}" >&2 2>&1
 
-echo ">>> Restore complete"
+echo ">>> Restore complete" >&2
 echo "{\"ok\":true,\"data\":{\"snapshot\":\"$SNAPSHOT\",\"target\":\"$TARGET\"}}"

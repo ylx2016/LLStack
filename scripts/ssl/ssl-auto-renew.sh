@@ -81,7 +81,7 @@ for domain_dir in "$SSL_DIR"/*/; do
     fi
 
     # Renew via acme.sh
-    echo ">>> Renewing $domain (reason: $REASON, days_left: $DAYS_LEFT)..."
+    echo ">>> Renewing $domain (reason: $REASON, days_left: $DAYS_LEFT)..." >&2
 
     # Find webroot
     WEBROOT=""
@@ -93,15 +93,15 @@ for domain_dir in "$SSL_DIR"/*/; do
 
     RENEW_OK=false
     if [[ -x "$ACME_HOME/acme.sh" ]]; then
-        if "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc --force 2>&1; then
+        if "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc --force >&2 2>&1; then
             # Install cert — treat failure as renewal failure
             if "$ACME_HOME/acme.sh" --install-cert -d "$domain" --ecc \
                 --key-file "$SSL_DIR/$domain/privkey.pem" \
                 --fullchain-file "$SSL_DIR/$domain/fullchain.pem" \
-                --reloadcmd "/usr/local/lsws/bin/lswsctrl reload" 2>&1; then
+                --reloadcmd "/usr/local/lsws/bin/lswsctrl reload" >&2 2>&1; then
                 RENEW_OK=true
             else
-                echo "  WARNING: cert renewed but install-cert failed for $domain"
+                echo "  WARNING: cert renewed but install-cert failed for $domain" >&2
             fi
         fi
     fi

@@ -20,13 +20,13 @@ done
 
 [[ -z "$REPO" || -z "$PW_FILE" ]] && { echo '{"ok":false,"error":"missing_args"}' >&2; exit 1; }
 
-echo ">>> Applying retention policy: last=$KEEP_LAST daily=$KEEP_DAILY weekly=$KEEP_WEEKLY monthly=$KEEP_MONTHLY"
+echo ">>> Applying retention policy: last=$KEEP_LAST daily=$KEEP_DAILY weekly=$KEEP_WEEKLY monthly=$KEEP_MONTHLY" >&2
 
 restic -r "$REPO" --password-file "$PW_FILE" forget \
     --keep-last "$KEEP_LAST" \
     --keep-daily "$KEEP_DAILY" \
     --keep-weekly "$KEEP_WEEKLY" \
     --keep-monthly "$KEEP_MONTHLY" \
-    --prune 2>&1
+    --prune >&2 2>&1
 
 echo '{"ok":true,"data":{"pruned":true}}'

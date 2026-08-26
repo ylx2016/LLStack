@@ -18,6 +18,13 @@ if [[ -z "$VERSION" ]]; then
     exit 1
 fi
 
+# Validate version format (defense in depth — VERSION is interpolated into dnf package
+# names, the extprocessor config block, and the php.ini path)
+if ! [[ "$VERSION" =~ ^[0-9]+$ ]]; then
+    echo '{"ok": false, "error": "invalid_version", "message": "--version must be numeric (e.g. 83)"}' >&2
+    exit 1
+fi
+
 PKG_PREFIX="php${VERSION}"
 LSPHP_PATH="/opt/remi/${PKG_PREFIX}/root/usr/bin/lsphp"
 LSWS_CONF="/usr/local/lsws/conf/httpd_config.conf"
@@ -50,7 +57,7 @@ dnf install -y \
     "${PKG_PREFIX}-php-opcache" \
     "${PKG_PREFIX}-php-soap" \
     "${PKG_PREFIX}-php-sodium" \
-    2>&1 || true
+    >&2 2>&1 || true
 
 # Verify installation
 if [[ ! -f "$LSPHP_PATH" ]]; then

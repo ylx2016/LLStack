@@ -64,9 +64,9 @@ case "$TYPE" in
             export AWS_DEFAULT_REGION="$REGION"
             EXTRA_ARGS=()
             [[ -n "$ENDPOINT" ]] && EXTRA_ARGS+=(--endpoint-url "$ENDPOINT")
-            aws s3 cp "$FILE" "s3://$BUCKET/llstack-backups/$FILENAME" "${EXTRA_ARGS[@]}" 2>&1
+            aws s3 cp "$FILE" "s3://$BUCKET/llstack-backups/$FILENAME" "${EXTRA_ARGS[@]}" >&2 2>&1
         else
-            echo ">>> S3 upload requires aws-cli. Install: dnf install awscli"
+            echo ">>> S3 upload requires aws-cli. Install: dnf install awscli" >&2
             exit 1
         fi
         ;;

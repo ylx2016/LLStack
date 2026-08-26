@@ -45,7 +45,7 @@ if [[ -z "$STAGING_ROOT" || -z "$PROD_ROOT" ]]; then
 fi
 
 # Step 1: Sync files from production to staging
-echo ">>> Step 1: Pulling files from production..."
+echo ">>> Step 1: Pulling files from production..." >&2
 rsync -a --delete \
     --exclude='.git' \
     --exclude='wp-config.php' \
@@ -56,11 +56,11 @@ rsync -a --delete \
 
 STAGING_OWNER=$(stat -c '%U' "$STAGING_ROOT" 2>/dev/null || echo "root")
 chown -R "$STAGING_OWNER:$STAGING_OWNER" "$STAGING_ROOT"
-echo "    Files synced: $PROD_ROOT → $STAGING_ROOT"
+echo "    Files synced: $PROD_ROOT → $STAGING_ROOT" >&2
 
 # Step 2: Pull database
 if [[ -n "$STAGING_DB" && -n "$PROD_DB" ]]; then
-    echo ">>> Step 2: Pulling database..."
+    echo ">>> Step 2: Pulling database..." >&2
     mysqldump "$PROD_DB" 2>/dev/null | mysql "$STAGING_DB" 2>/dev/null
 
     # Replace production domain with staging domain
@@ -68,17 +68,17 @@ if [[ -n "$STAGING_DB" && -n "$PROD_DB" ]]; then
         cd "$STAGING_ROOT"
         wp search-replace "https://$PROD_DOMAIN" "https://$STAGING_DOMAIN" --all-tables --skip-columns=guid --allow-root 2>&1 || true
         wp search-replace "http://$PROD_DOMAIN" "http://$STAGING_DOMAIN" --all-tables --skip-columns=guid --allow-root 2>&1 || true
-        echo "    WP domain replaced: $PROD_DOMAIN → $STAGING_DOMAIN"
+        echo "    WP domain replaced: $PROD_DOMAIN → $STAGING_DOMAIN" >&2
     else
         mysql "$STAGING_DB" -e "
             UPDATE wp_options SET option_value = REPLACE(option_value, '$PROD_DOMAIN', '$STAGING_DOMAIN')
             WHERE option_name IN ('siteurl', 'home');
         " 2>/dev/null || true
-        echo "    wp_options updated"
+        echo "    wp_options updated" >&2
     fi
-    echo "    Database pulled: $PROD_DB → $STAGING_DB"
+    echo "    Database pulled: $PROD_DB → $STAGING_DB" >&2
 else
-    echo ">>> Step 2: Skipped (no database specified)"
+    echo ">>> Step 2: Skipped (no database specified)" >&2
 fi
 
 echo '{"ok":true}'

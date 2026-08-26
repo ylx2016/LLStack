@@ -10,7 +10,7 @@ CERT_DIR="/usr/local/lsws/conf/ssl"
 RENEW_DAYS=30
 RENEWED=0
 
-echo ">>> Checking SSL certificates..."
+echo ">>> Checking SSL certificates..." >&2
 
 for cert in "$CERT_DIR"/*/fullchain.pem; do
     if [[ ! -f "$cert" ]]; then
@@ -33,14 +33,16 @@ for cert in "$CERT_DIR"/*/fullchain.pem; do
     days_left=$(( (expiry_epoch - now_epoch) / 86400 ))
 
     if [[ $days_left -lt $RENEW_DAYS ]]; then
-        echo "  $domain: $days_left days left — renewing..."
+        echo "  $domain: $days_left days left — renewing..." >&2
         if [[ -d "$ACME_HOME" && -x "$ACME_HOME/acme.sh" ]]; then
             # Count as renewed only if both renew and install-cert succeed.
-            if "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc 2>&1 && \
+            if "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc >&2 2>&1 && \
                "$ACME_HOME/acme.sh" --install-cert -d "$domain" --ecc \
                     --key-file "$CERT_DIR/$domain/privkey.pem" \
-                    --fullchain-file "$CERT_DIR/$domain/fullchain.pem" 2>&1; then
-                ((RENEWED++))
+                    --fullchain-file "$CERT_DIR/$domain/fullchain.pem" >&2 2>&1; then
+                # NOT ((RENEWED++)): with RENEWED=0 the post-increment expression
+                # evaluates to 0, which is exit status 1 and aborts under set -e.
+                RENEWED=$((RENEWED + 1))
             else
                 echo "  $domain: renewal or install failed" >&2
             fi
@@ -48,14 +50,14 @@ for cert in "$CERT_DIR"/*/fullchain.pem; do
             echo "  $domain: acme.sh not found at $ACME_HOME, cannot renew" >&2
         fi
     else
-        echo "  $domain: $days_left days left — OK"
+        echo "  $domain: $days_left days left — OK" >&2
     fi
 done
 
 if [[ $RENEWED -gt 0 ]]; then
-    echo ">>> Reloading LiteHttpd ($RENEWED certs renewed)..."
+    echo ">>> Reloading LiteHttpd ($RENEWED certs renewed)..." >&2
     /usr/local/lsws/bin/lswsctrl reload 2>/dev/null || true
 fi
 
-echo ">>> Done. Renewed: $RENEWED"
+echo ">>> Done. Renewed: $RENEWED" >&2
 echo "{\"ok\":true,\"data\":{\"renewed\":$RENEWED}}"
