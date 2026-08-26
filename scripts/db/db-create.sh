@@ -45,7 +45,9 @@ case "$ENGINE" in
         fi
 
         # Create database
-        mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+        if ! mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"; then
+            echo '{"ok": false, "error": "create_database_failed"}' >&2; exit 1
+        fi
 
         # Create user and grant — feed SQL via stdin (temp file) so the password
         # never appears in argv (ps leak); printf does not shell-interpret the value.
@@ -54,7 +56,8 @@ case "$ENGINE" in
             # MySQL/Percona: use mysql_native_password (8.0+ defaults to caching_sha2_password)
             ESCAPED_PASS="${DB_PASS//\\/\\\\}"
             ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
-            SQL_TMP=$(mktemp /tmp/llstack-sql.XXXXXXXXXX)
+            SQL_TMP=$(mktemp); mv "$SQL_TMP" "${SQL_TMP}.sql"; SQL_TMP="${SQL_TMP}.sql"
+            # GNU mktemp template must end in X; rename after creation.
             trap 'rm -f -- "$SQL_TMP"' EXIT
             printf '%s\n' \
 "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('$ESCAPED_PASS');" > "$SQL_TMP"
@@ -64,14 +67,20 @@ case "$ENGINE" in
                 if ! mysql < "$SQL_TMP" 2>/dev/null; then
                     printf '%s\n' \
 "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$ESCAPED_PASS';" > "$SQL_TMP"
-                    mysql < "$SQL_TMP"
+                    if ! mysql < "$SQL_TMP"; then
+                        echo '{"ok": false, "error": "create_user_failed"}' >&2; exit 1
+                    fi
                 fi
             fi
             printf '%s\n' \
 "GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';" > "$SQL_TMP"
-            mysql < "$SQL_TMP"
+            if ! mysql < "$SQL_TMP"; then
+                echo '{"ok": false, "error": "grant_failed"}' >&2; exit 1
+            fi
             printf 'FLUSH PRIVILEGES;\n' > "$SQL_TMP"
-            mysql < "$SQL_TMP"
+            if ! mysql < "$SQL_TMP"; then
+                echo '{"ok": false, "error": "flush_privileges_failed"}' >&2; exit 1
+            fi
         fi
 
         HOST="localhost"
@@ -86,11 +95,15 @@ case "$ENGINE" in
         # Create user (escape single quotes in password)
         if [[ -n "$DB_USER" && -n "$DB_PASS" ]]; then
             ESCAPED_PASS="${DB_PASS//\'/\'\'}"
-            sudo -u postgres psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '${ESCAPED_PASS}';"
+            if ! sudo -u postgres psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '${ESCAPED_PASS}';"; then
+                echo '{"ok": false, "error": "create_user_failed"}' >&2; exit 1
+            fi
         fi
 
         # Create database
-        sudo -u postgres psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"${DB_USER:-postgres}\";"
+        if ! sudo -u postgres psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"${DB_USER:-postgres}\";"; then
+            echo '{"ok": false, "error": "create_database_failed"}' >&2; exit 1
+        fi
 
         HOST="localhost"
         PORT=5432
@@ -102,6 +115,13 @@ case "$ENGINE" in
         ;;
 esac
 
-cat << EOF
-{"ok": true, "data": {"name": "$DB_NAME", "engine": "$ENGINE", "user": "$DB_USER", "host": "$HOST", "port": $PORT}}
-EOF
+# Use Python for JSON serialization so user-supplied values containing " or \
+# cannot break the contract the backend parses the whole of stdout for.
+python3 - "$DB_NAME" "$ENGINE" "$DB_USER" "$HOST" "$PORT" <<'PYEOF'
+import json, sys
+name, engine, user, host, port = sys.argv[1:6]
+print(json.dumps({
+    "ok": True,
+    "data": {"name": name, "engine": engine, "user": user, "host": host, "port": int(port)},
+}, separators=(",", ":")))
+PYEOF

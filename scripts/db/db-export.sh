@@ -23,7 +23,10 @@ if ! echo "$NAME" | grep -qP '^[a-zA-Z][a-zA-Z0-9_]{0,63}$'; then
 fi
 
 umask 0077
-OUTPUT=$(mktemp "/tmp/.llstack_export_XXXXXXXXXXXX.sql.gz")
+# GNU mktemp requires the template to end in X. Create with the suffix as a
+# separate step (same pattern as backup-restic-snapshot.sh after the earlier
+# audit fix).
+OUTPUT=$(mktemp); mv "$OUTPUT" "${OUTPUT}.sql.gz"; OUTPUT="${OUTPUT}.sql.gz"
 
 case "$ENGINE" in
     mariadb|mysql)
@@ -56,4 +59,13 @@ esac
 
 chmod 600 "$OUTPUT"
 SIZE=$(stat -c%s "$OUTPUT" 2>/dev/null || echo 0)
-echo "{\"ok\":true,\"data\":{\"path\":\"$OUTPUT\",\"size\":$SIZE,\"schema_only\":$SCHEMA_ONLY}}"
+# Use Python for JSON serialization so $OUTPUT (which lives under /tmp) cannot
+# break the contract the backend parses the whole of stdout for.
+python3 - "$OUTPUT" "$SIZE" "$SCHEMA_ONLY" <<'PYEOF'
+import json, sys
+output, size, schema_only = sys.argv[1], int(sys.argv[2]), sys.argv[3] == "true"
+print(json.dumps({
+    "ok": True,
+    "data": {"path": output, "size": size, "schema_only": schema_only},
+}, separators=(",", ":")))
+PYEOF

@@ -24,6 +24,11 @@ if [[ ! -f "$PW_FILE" ]]; then
     echo '{"ok": false, "error": "password_file_not_found"}' >&2; exit 1
 fi
 
+case "$ENGINE" in
+    mariadb|mysql|postgresql) ;;
+    *) echo '{"ok": false, "error": "unsupported_engine"}' >&2; exit 1 ;;
+esac
+
 # Validate inputs
 if ! echo "$DB_USER" | grep -qP '^[a-zA-Z][a-zA-Z0-9_]{0,31}$'; then
     echo '{"ok": false, "error": "invalid_username"}' >&2; exit 1
@@ -38,15 +43,19 @@ fi
 DB_PASS=$(cat "$PW_FILE")
 rm -f "$PW_FILE"
 
+# Reject passwords with control characters early — they would also break
+# the SQL escaping below, but surfacing the error here is clearer.
+if [[ "$DB_PASS" =~ $'\n' ]] || printf '%s' "$DB_PASS" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo '{"ok": false, "error": "invalid_password_chars"}' >&2; exit 1
+fi
+
 case "$ENGINE" in
     mariadb|mysql)
         # Escape backslashes first, then single quotes (prevents \' bypass)
         ESCAPED_PASS="${DB_PASS//\\/\\\\}"
         ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
-        # MariaDB: IDENTIFIED VIA; MySQL/Percona: IDENTIFIED WITH
-        # Write SQL to a temp file and feed via stdin so the password never appears
-        # in argv (ps leak) — printf does not shell-interpret the value.
-        SQL_TMP=$(mktemp /tmp/llstack-sql.XXXXXXXXXX)
+        # GNU mktemp template must end in X; rename after creation.
+        SQL_TMP=$(mktemp); mv "$SQL_TMP" "${SQL_TMP}.sql"; SQL_TMP="${SQL_TMP}.sql"
         trap 'rm -f -- "$SQL_TMP"' EXIT
         printf '%s\n' \
 "CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED VIA mysql_native_password USING PASSWORD('${ESCAPED_PASS}');" > "$SQL_TMP"
@@ -56,25 +65,41 @@ case "$ENGINE" in
             if ! mysql < "$SQL_TMP" 2>/dev/null; then
                 printf '%s\n' \
 "CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED BY '${ESCAPED_PASS}';" > "$SQL_TMP"
-                mysql < "$SQL_TMP"
+                if ! mysql < "$SQL_TMP"; then
+                    echo '{"ok": false, "error": "create_user_failed"}' >&2; exit 1
+                fi
             fi
         fi
         printf '%s\n' \
 "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${HOST}';" > "$SQL_TMP"
-        mysql < "$SQL_TMP"
+        if ! mysql < "$SQL_TMP"; then
+            echo '{"ok": false, "error": "grant_failed"}' >&2; exit 1
+        fi
         printf 'FLUSH PRIVILEGES;\n' > "$SQL_TMP"
-        mysql < "$SQL_TMP"
+        if ! mysql < "$SQL_TMP"; then
+            echo '{"ok": false, "error": "flush_privileges_failed"}' >&2; exit 1
+        fi
         ;;
     postgresql)
         # Escape single quotes and backslashes for PostgreSQL
         ESCAPED_PASS="${DB_PASS//\\/\\\\}"
         ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
-        sudo -u postgres psql -c "CREATE USER \"${DB_USER}\" WITH PASSWORD '${ESCAPED_PASS}';" 2>/dev/null || true
-        sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \"${DB_NAME}\" TO \"${DB_USER}\";"
-        ;;
-    *)
-        echo '{"ok": false, "error": "unsupported_engine"}' >&2; exit 1
+        if ! sudo -u postgres psql -c "CREATE USER \"${DB_USER}\" WITH PASSWORD '${ESCAPED_PASS}';"; then
+            echo '{"ok": false, "error": "create_user_failed"}' >&2; exit 1
+        fi
+        if ! sudo -u postgres psql -c "GRANT ALL PRIVILEGES ON DATABASE \"${DB_NAME}\" TO \"${DB_USER}\";"; then
+            echo '{"ok": false, "error": "grant_failed"}' >&2; exit 1
+        fi
         ;;
 esac
 
-echo '{"ok": true}'
+# Use Python for JSON serialization. Include the user/host/port so the panel
+# can render a usable "manage DB" view.
+python3 - "$ENGINE" "$DB_NAME" "$DB_USER" "$HOST" <<'PYEOF'
+import json, sys
+engine, db_name, db_user, host = sys.argv[1:5]
+print(json.dumps({
+    "ok": True,
+    "data": {"engine": engine, "database": db_name, "user": db_user, "host": host},
+}, separators=(",", ":")))
+PYEOF
