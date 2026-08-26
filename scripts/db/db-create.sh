@@ -47,17 +47,31 @@ case "$ENGINE" in
         # Create database
         mysql -e "CREATE DATABASE IF NOT EXISTS \`$DB_NAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
-        # Create user and grant (password via stdin to avoid shell escaping issues)
+        # Create user and grant — feed SQL via stdin (temp file) so the password
+        # never appears in argv (ps leak); printf does not shell-interpret the value.
         if [[ -n "$DB_USER" && -n "$DB_PASS" ]]; then
             # MariaDB: use mysql_native_password (10.11+ defaults to unix_socket)
             # MySQL/Percona: use mysql_native_password (8.0+ defaults to caching_sha2_password)
             ESCAPED_PASS="${DB_PASS//\\/\\\\}"
             ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
-            mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('$ESCAPED_PASS');" 2>/dev/null || \
-            mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ESCAPED_PASS';" 2>/dev/null || \
-            mysql -e "CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$ESCAPED_PASS';"
-            mysql -e "GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';"
-            mysql -e "FLUSH PRIVILEGES;"
+            SQL_TMP=$(mktemp /tmp/llstack-sql.XXXXXXXXXX)
+            trap 'rm -f -- "$SQL_TMP"' EXIT
+            printf '%s\n' \
+"CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('$ESCAPED_PASS');" > "$SQL_TMP"
+            if ! mysql < "$SQL_TMP" 2>/dev/null; then
+                printf '%s\n' \
+"CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED WITH mysql_native_password BY '$ESCAPED_PASS';" > "$SQL_TMP"
+                if ! mysql < "$SQL_TMP" 2>/dev/null; then
+                    printf '%s\n' \
+"CREATE USER IF NOT EXISTS '$DB_USER'@'localhost' IDENTIFIED BY '$ESCAPED_PASS';" > "$SQL_TMP"
+                    mysql < "$SQL_TMP"
+                fi
+            fi
+            printf '%s\n' \
+"GRANT ALL PRIVILEGES ON \`$DB_NAME\`.* TO '$DB_USER'@'localhost';" > "$SQL_TMP"
+            mysql < "$SQL_TMP"
+            printf 'FLUSH PRIVILEGES;\n' > "$SQL_TMP"
+            mysql < "$SQL_TMP"
         fi
 
         HOST="localhost"
@@ -65,14 +79,18 @@ case "$ENGINE" in
         ;;
 
     postgresql)
+        # Validate user (double-quoted identifier — must be a plain identifier)
+        if [[ -n "$DB_USER" ]] && ! echo "$DB_USER" | grep -qP '^[a-zA-Z][a-zA-Z0-9_]{0,31}$'; then
+            echo '{"ok": false, "error": "invalid_db_user"}' >&2; exit 1
+        fi
         # Create user (escape single quotes in password)
         if [[ -n "$DB_USER" && -n "$DB_PASS" ]]; then
             ESCAPED_PASS="${DB_PASS//\'/\'\'}"
-            sudo -u postgres psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '${ESCAPED_PASS}';" 2>/dev/null || true
+            sudo -u postgres psql -c "CREATE USER \"$DB_USER\" WITH PASSWORD '${ESCAPED_PASS}';"
         fi
 
         # Create database
-        sudo -u postgres psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"${DB_USER:-postgres}\";" 2>/dev/null
+        sudo -u postgres psql -c "CREATE DATABASE \"$DB_NAME\" OWNER \"${DB_USER:-postgres}\";"
 
         HOST="localhost"
         PORT=5432

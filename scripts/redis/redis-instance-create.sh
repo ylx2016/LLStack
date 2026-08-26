@@ -26,6 +26,16 @@ if [[ -z "$USER" || -z "$PASSWORD" ]]; then
     exit 1
 fi
 
+# Reject passwords with control characters (prevent redis.conf injection)
+if [[ "$PASSWORD" =~ $'\n' ]] || printf '%s' "$PASSWORD" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+    echo '{"ok": false, "error": "invalid_password_chars"}' >&2; exit 1
+fi
+
+# Validate maxmemory is a positive integer (prevents config injection via maxmemory line)
+if ! [[ "$MAXMEMORY" =~ ^[0-9]+$ ]]; then
+    echo '{"ok": false, "error": "invalid_maxmemory"}' >&2; exit 1
+fi
+
 if ! id "$USER" &>/dev/null; then
     echo '{"ok": false, "error": "user_not_found"}' >&2
     exit 1
@@ -113,9 +123,9 @@ After=network.target
 Type=simple
 User=%i
 Group=%i
-EnvironmentFile=-/home/%i/.redis/env
-ExecStart=${REDIS_SERVER_BIN} /home/%i/.redis/redis.conf
-ExecStop=/bin/bash -c 'REDISCLI_AUTH="\$REDIS_PASSWORD" ${REDIS_CLI_BIN} -s /home/%i/.redis/redis.sock shutdown nosave'
+EnvironmentFile=-%h/.redis/env
+ExecStart=${REDIS_SERVER_BIN} %h/.redis/redis.conf
+ExecStop=/bin/bash -c 'REDISCLI_AUTH="\$REDIS_PASSWORD" ${REDIS_CLI_BIN} -s %h/.redis/redis.sock shutdown nosave'
 Restart=always
 RestartSec=5
 LimitNOFILE=10032

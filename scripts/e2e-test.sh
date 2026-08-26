@@ -126,12 +126,20 @@ checkv "external HTTPS ($DOMAIN:30333)" "$EXT_CODE"
 # ─── Phase 5: Admin Setup + Auth ───
 echo -e "\n=== Phase 5: Admin Setup + Auth ==="
 
+# Require an explicit admin password — never fall back to a hardcoded default,
+# which would be a backdoor on a live/not-yet-hardened panel.
+ADMIN_PASSWORD="${ADMIN_PASSWORD:-}"
+if [[ -z "$ADMIN_PASSWORD" ]]; then
+    echo -e "  ${RED}SKIP${NC}: Phase 5 — set \$ADMIN_PASSWORD to run the admin auth checks"
+    SKIP=$((SKIP+1))
+else
 TOKEN=$(python3.12 << 'PY'
-import json, hashlib, base64, urllib.request, ssl
+import json, hashlib, base64, urllib.request, ssl, os
 ctx = ssl.create_default_context()
 ctx.check_hostname = False
 ctx.verify_mode = ssl.CERT_NONE
 BASE = "https://127.0.0.1:30333"
+pw = os.environ.get("ADMIN_PASSWORD", "")
 try:
     r = urllib.request.urlopen(urllib.request.Request(f"{BASE}/api/auth/altcha-challenge"), context=ctx)
 except:
@@ -142,7 +150,7 @@ for i in range(c['maxnumber']+1):
     if hashlib.sha256((c['salt']+str(i)).encode()).hexdigest()==c['challenge']:
         altcha=base64.b64encode(json.dumps({'algorithm':'SHA-256','challenge':c['challenge'],'number':i,'salt':c['salt'],'signature':c['signature']}).encode()).decode()
         break
-data=json.dumps({"username":"admin","password":"Admin123X","altcha":altcha}).encode()
+data=json.dumps({"username":"admin","password":pw,"altcha":altcha}).encode()
 try:
     req=urllib.request.Request(f"{BASE}/api/auth/setup",data=data,headers={'Content-Type':'application/json'},method='POST')
     if 'https' in BASE:
@@ -166,6 +174,7 @@ if [ -n "$TOKEN" ] && [ ${#TOKEN} -gt 20 ]; then
 else
     echo -e "  ${RED}FAIL${NC}: admin auth — no token"
     FAIL=$((FAIL+1))
+fi
 fi
 
 # ─── Phase 6: Core API Tests ───

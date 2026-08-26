@@ -48,10 +48,20 @@ if [[ -n "$TARGET_DB" ]] && ! echo "$TARGET_DB" | grep -qP '^[a-zA-Z][a-zA-Z0-9_
     echo '{"ok":false,"error":"invalid_db_name"}' >&2; exit 1
 fi
 
-# Resolve home dirs (avoid /root/ — nobody can't access)
-_resolve_home() { [[ "$1" == "root" ]] && echo "/var/www" || getent passwd "$1" | cut -d: -f6; }
+# Resolve home dirs (avoid /root/ — nobody can't access).
+# Validate source/target users exist first so _resolve_home never aborts under set -e.
+for _u in "${SOURCE_USER:-root}" "${TARGET_USER:-root}"; do
+    if [[ "$_u" != "root" ]] && ! id "$_u" &>/dev/null; then
+        echo '{"ok":false,"error":"user_not_found","message":"System user '"$_u"' does not exist"}' >&2
+        exit 1
+    fi
+done
+_resolve_home() { [[ "$1" == "root" ]] && { echo "/var/www"; return 0; }; getent passwd "$1" | cut -d: -f6; }
 SOURCE_HOME=$(_resolve_home "${SOURCE_USER:-root}")
 TARGET_HOME=$(_resolve_home "${TARGET_USER:-root}")
+if [[ -z "$SOURCE_HOME" || -z "$TARGET_HOME" ]]; then
+    echo '{"ok":false,"error":"home_not_found"}' >&2; exit 1
+fi
 SOURCE_ROOT="$SOURCE_HOME/public_html/$SOURCE_DOMAIN"
 TARGET_ROOT="$TARGET_HOME/public_html/$TARGET_DOMAIN"
 TARGET_OWNER="${TARGET_USER:-root}"
@@ -72,9 +82,13 @@ if [[ -n "$SOURCE_DB" && -n "$TARGET_DB" ]]; then
     echo ">>> Step 2: Cloning database..."
     # Create target database
     mysql -e "CREATE DATABASE IF NOT EXISTS \`$TARGET_DB\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || true
-    # Dump and import
-    mysqldump "$SOURCE_DB" 2>/dev/null | mysql "$TARGET_DB" 2>/dev/null
-    echo "    Database cloned: $SOURCE_DB → $TARGET_DB"
+    # Dump and import — fail cleanly (don't leave a half-cloned state reported as success)
+    if mysqldump "$SOURCE_DB" 2>/dev/null | mysql "$TARGET_DB" 2>/dev/null; then
+        echo "    Database cloned: $SOURCE_DB → $TARGET_DB"
+    else
+        echo '{"ok":false,"error":"db_clone_failed","message":"Database dump/import failed"}' >&2
+        exit 1
+    fi
 
     # Grant same user access
     DB_USER="${TARGET_DB}_user"
@@ -82,10 +96,22 @@ if [[ -n "$SOURCE_DB" && -n "$TARGET_DB" ]]; then
     ESCAPED_PASS="${DB_PASS//\\/\\\\}"
     ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
     # MariaDB: IDENTIFIED VIA; MySQL/Percona: IDENTIFIED WITH
-    mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('${ESCAPED_PASS}');" 2>/dev/null || \
-    mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED WITH mysql_native_password BY '${ESCAPED_PASS}';" 2>/dev/null || \
-    mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${ESCAPED_PASS}';" 2>/dev/null || true
-    mysql -e "GRANT ALL PRIVILEGES ON \`${TARGET_DB}\`.* TO '${DB_USER}'@'localhost'; FLUSH PRIVILEGES;" 2>/dev/null || true
+    SQL_TMP=$(mktemp /tmp/llstack-sql.XXXXXXXXXX)
+    trap 'rm -f -- "$SQL_TMP"' EXIT
+    printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED VIA mysql_native_password USING PASSWORD('${ESCAPED_PASS}');" > "$SQL_TMP"
+    if ! mysql < "$SQL_TMP" 2>/dev/null; then
+        printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED WITH mysql_native_password BY '${ESCAPED_PASS}';" > "$SQL_TMP"
+        if ! mysql < "$SQL_TMP" 2>/dev/null; then
+            printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'localhost' IDENTIFIED BY '${ESCAPED_PASS}';" > "$SQL_TMP"
+            mysql < "$SQL_TMP" 2>/dev/null || true
+        fi
+    fi
+    printf '%s\n' \
+"GRANT ALL PRIVILEGES ON \`${TARGET_DB}\`.* TO '${DB_USER}'@'localhost'; FLUSH PRIVILEGES;" > "$SQL_TMP"
+    mysql < "$SQL_TMP" 2>/dev/null || true
     echo "    DB user: ${DB_USER} (password stored securely)"
 else
     echo ">>> Step 2: Skipped (no database specified)"
@@ -169,7 +195,8 @@ virtualhost $TARGET_DOMAIN {
 REGEOF
 fi
 
-# Add listener mapping
+# Add listener mapping (idempotent — skip if this domain is already mapped)
+if ! grep -q "map.*$TARGET_DOMAIN" "$LSWS_CONF" 2>/dev/null; then
 python3 - "$LSWS_CONF" "$TARGET_DOMAIN" << 'PYEOF'
 import re, sys
 conf_path, domain = sys.argv[1], sys.argv[2]
@@ -181,6 +208,7 @@ content = re.sub(pattern, replacement, content, count=1)
 with open(conf_path, 'w') as f:
     f.write(content)
 PYEOF
+fi
 
 # Step 5: Reload
 echo ">>> Step 5: Reloading LiteHttpd..."

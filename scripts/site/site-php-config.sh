@@ -41,6 +41,7 @@ try:
     with open(sys.argv[1]) as f:
         entries = json.load(f)
     lines = []
+    bad = []
     for entry in entries:
         key = entry.get("key", "")
         value = entry.get("value", "")
@@ -48,10 +49,15 @@ try:
         # Validate key format (alphanumeric + dots + underscores)
         if not all(c.isalnum() or c in "._" for c in key):
             continue
-        # Sanitize value (no newlines or control chars)
-        value = value.replace("\n", "").replace("\r", "")
+        # Reject values containing control characters or config-block delimiters
+        # ({};"#\) that could break out of the phpIniOverride block or inject directives.
+        if any(ord(c) < 32 or ord(c) == 127 or c in '{};"#\\' for c in value):
+            bad.append(key)
+            continue
         directive = "php_admin_value" if is_admin else "php_value"
         lines.append(f"  {directive} {key} {value}")
+    if bad:
+        print(f"# skipped invalid values for keys: {', '.join(bad)}", file=sys.stderr)
     print("\n".join(lines))
 except Exception as e:
     print(f"# error: {e}", file=sys.stderr)
@@ -110,9 +116,6 @@ except Exception:
     raise
 PYEOF
 
-# Clean up config file
-rm -f "$CONFIG_FILE"
-
 # Validate config by restarting (lswsctrl has no configtest)
 /usr/local/lsws/bin/lswsctrl restart &>/dev/null || true
 sleep 1
@@ -122,12 +125,14 @@ if ! pgrep -f "litespeed|lshttpd|openlitespeed" &>/dev/null; then
         mv "${VHOST_CONF}.bak" "$VHOST_CONF"
         /usr/local/lsws/bin/lswsctrl restart &>/dev/null || true
     fi
+    # Keep the caller-supplied config file on failure so it can be retried
     echo '{"ok":false,"error":"config_validation_failed","message":"LiteHttpd failed to start, changes reverted"}' >&2
     exit 1
 fi
 
-# Remove backup on success
+# Remove backup and the caller-supplied config file now that validation has passed
 rm -f "${VHOST_CONF}.bak"
+rm -f "$CONFIG_FILE"
 
 # Reload LiteHttpd
 /usr/local/lsws/bin/lswsctrl reload &>/dev/null || true

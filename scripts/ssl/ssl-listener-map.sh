@@ -106,11 +106,12 @@ PYEOF
 
 # Validate config by attempting a graceful restart
 # (lswsctrl has no configtest subcommand — restart validates implicitly)
-/usr/local/lsws/bin/lswsctrl restart &>/dev/null
+/usr/local/lsws/bin/lswsctrl restart &>/dev/null || true
 sleep 2
 
 # Check if LiteHttpd is still running after restart
-if ! pgrep -f "litespeed\|lshttpd\|openlitespeed" &>/dev/null; then
+# (pgrep uses ERE — use | alternation, not \| which is a literal pipe and never matches)
+if ! pgrep -f 'litespeed|lshttpd|openlitespeed' &>/dev/null; then
     # Rollback on failure
     mv "${LSWS_CONF}.bak" "$LSWS_CONF"
     /usr/local/lsws/bin/lswsctrl restart &>/dev/null || true

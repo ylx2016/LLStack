@@ -145,6 +145,10 @@ DIST = os.environ.get('LLSTACK_DIST_DIR', '/opt/llstack/web/dist')
 @app.route('/', defaults={'path': ''})
 @app.route('/<path:path>')
 def serve(path):
+    # Never intercept API or WebSocket routes (handled by blueprints)
+    if path.startswith(('api/', 'ws/')):
+        from flask import abort
+        abort(404)
     f = os.path.join(DIST, path)
     if path and os.path.isfile(f):
         return send_from_directory(DIST, path)
@@ -157,8 +161,12 @@ PYEOF
 
 setup_sudoers() {
     log "Configuring sudoers..."
+    # Allow the panel user to run the management scripts as root, both directly and
+    # via `bash script` (llstack-ctl's run_script) and with an env prefix (redis commands).
+    # Without the /usr/bin/bash forms, `sudo bash script` would be DENIED because sudo
+    # matches the command `bash`, not the script path — a silent CLI failure.
     cat > /etc/sudoers.d/llstack << SUDOEOF
-$LLSTACK_USER ALL=(root) NOPASSWD: $LLSTACK_DIR/scripts/*/*.sh
+$LLSTACK_USER ALL=(root) NOPASSWD: $LLSTACK_DIR/scripts/*/*.sh, /usr/bin/bash $LLSTACK_DIR/scripts/*/*.sh, /usr/bin/env * $LLSTACK_DIR/scripts/*/*.sh
 SUDOEOF
     chmod 440 /etc/sudoers.d/llstack
 }

@@ -50,7 +50,13 @@ chmod 750 "$HOME_DIR/logs"
 chmod 700 "$HOME_DIR/tmp"
 
 # 4. Add to lsws group (for LiteHttpd access)
-usermod -aG nobody "$USERNAME" 2>/dev/null || true
+# Use the actual web-server group (the 'lsws' group created by LiteHttpd) rather
+# than 'nobody', which is not the intended group and grants unrelated memberships.
+if getent group lsws &>/dev/null; then
+    usermod -aG lsws "$USERNAME"
+else
+    usermod -aG nobody "$USERNAME" 2>/dev/null || true
+fi
 
 cat << EOF
 {"ok": true, "data": {"username": "$USERNAME", "home_dir": "$HOME_DIR", "uid": $(id -u "$USERNAME")}}

@@ -9,7 +9,16 @@ DRY_RUN=false
 [[ "${1:-}" == "--dry-run" ]] && DRY_RUN=true
 
 SSL_DIR="/usr/local/lsws/conf/ssl"
-ACME_HOME="/opt/llstack/.acme.sh"
+# Find acme.sh — install.sh installs to /root/.acme.sh; fall back to other common locations.
+ACME_HOME="${ACME_HOME:-}"
+if [[ -z "$ACME_HOME" ]]; then
+    for _p in "/root/.acme.sh" "/opt/llstack/.acme.sh" "$HOME/.acme.sh"; do
+        if [[ -f "$_p/acme.sh" ]]; then
+            ACME_HOME="$_p"
+            break
+        fi
+    done
+fi
 RENEWED=0
 SKIPPED=0
 FAILED=0

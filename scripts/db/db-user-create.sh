@@ -44,11 +44,26 @@ case "$ENGINE" in
         ESCAPED_PASS="${DB_PASS//\\/\\\\}"
         ESCAPED_PASS="${ESCAPED_PASS//\'/\'\'}"
         # MariaDB: IDENTIFIED VIA; MySQL/Percona: IDENTIFIED WITH
-        mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED VIA mysql_native_password USING PASSWORD('${ESCAPED_PASS}');" 2>/dev/null || \
-        mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED WITH mysql_native_password BY '${ESCAPED_PASS}';" 2>/dev/null || \
-        mysql -e "CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED BY '${ESCAPED_PASS}';"
-        mysql -e "GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${HOST}';"
-        mysql -e "FLUSH PRIVILEGES;"
+        # Write SQL to a temp file and feed via stdin so the password never appears
+        # in argv (ps leak) — printf does not shell-interpret the value.
+        SQL_TMP=$(mktemp /tmp/llstack-sql.XXXXXXXXXX)
+        trap 'rm -f -- "$SQL_TMP"' EXIT
+        printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED VIA mysql_native_password USING PASSWORD('${ESCAPED_PASS}');" > "$SQL_TMP"
+        if ! mysql < "$SQL_TMP" 2>/dev/null; then
+            printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED WITH mysql_native_password BY '${ESCAPED_PASS}';" > "$SQL_TMP"
+            if ! mysql < "$SQL_TMP" 2>/dev/null; then
+                printf '%s\n' \
+"CREATE USER IF NOT EXISTS '${DB_USER}'@'${HOST}' IDENTIFIED BY '${ESCAPED_PASS}';" > "$SQL_TMP"
+                mysql < "$SQL_TMP"
+            fi
+        fi
+        printf '%s\n' \
+"GRANT ALL PRIVILEGES ON \`${DB_NAME}\`.* TO '${DB_USER}'@'${HOST}';" > "$SQL_TMP"
+        mysql < "$SQL_TMP"
+        printf 'FLUSH PRIVILEGES;\n' > "$SQL_TMP"
+        mysql < "$SQL_TMP"
         ;;
     postgresql)
         # Escape single quotes and backslashes for PostgreSQL

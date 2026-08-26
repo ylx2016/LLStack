@@ -20,8 +20,12 @@ done
 [[ -z "$FILE" || -z "$TYPE" ]] && { echo '{"ok":false,"error":"missing_args"}' >&2; exit 1; }
 [[ ! -f "$FILE" ]] && { echo '{"ok":false,"error":"file_not_found"}' >&2; exit 1; }
 
-# Cleanup credential temp file on exit
-trap 'rm -f -- "$CONFIG_FILE" 2>/dev/null || true' EXIT
+# Cleanup credential temp file on exit.
+# Only remove the file if the caller explicitly told us it is a temp file we own
+# (--cleanup). Never delete a caller-supplied config file — it may be a persistent
+# credentials file reused across scheduled pushes.
+CLEANUP=false
+trap 'if [[ "$CLEANUP" == true ]]; then rm -f -- "$CONFIG_FILE" 2>/dev/null || true; fi' EXIT
 
 FILENAME=$(basename "$FILE")
 

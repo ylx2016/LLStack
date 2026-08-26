@@ -24,7 +24,9 @@ done
 IFS=',' read -ra PATH_ARRAY <<< "$PATHS"
 BACKUP_PATHS=()
 for p in "${PATH_ARRAY[@]}"; do
-    p=$(echo "$p" | xargs)  # trim whitespace
+    # Trim leading/trailing whitespace without xargs (which would re-parse quotes/backslashes)
+    p="${p#"${p%%[![:space:]]*}"}"
+    p="${p%"${p##*[![:space:]]}"}"
     [[ -d "$p" || -f "$p" ]] && BACKUP_PATHS+=("$p")
 done
 
@@ -44,17 +46,23 @@ if [[ -n "$DB_NAME" && -n "$DB_ENGINE" ]]; then
     echo ">>> Dumping database: $DB_NAME ($DB_ENGINE)..."
     case "$DB_ENGINE" in
         mariadb|mysql)
-            mysqldump --single-transaction --quick "$DB_NAME" 2>/dev/null | gzip > "$DB_DUMP"
+            if ! mysqldump --single-transaction --quick "$DB_NAME" 2>/dev/null | gzip > "$DB_DUMP"; then
+                echo "  WARNING: database dump failed for $DB_NAME (files will still be snapshotted)" >&2
+                DB_DUMP=""
+            fi
             ;;
         postgresql)
-            sudo -u postgres pg_dump "$DB_NAME" 2>/dev/null | gzip > "$DB_DUMP"
+            if ! sudo -u postgres pg_dump "$DB_NAME" 2>/dev/null | gzip > "$DB_DUMP"; then
+                echo "  WARNING: database dump failed for $DB_NAME (files will still be snapshotted)" >&2
+                DB_DUMP=""
+            fi
             ;;
         *)
             echo '{"ok":false,"error":"unsupported_db_engine"}' >&2; exit 1
             ;;
     esac
 
-    if [[ -s "$DB_DUMP" ]]; then
+    if [[ -n "$DB_DUMP" && -s "$DB_DUMP" ]]; then
         BACKUP_PATHS+=("$DB_DUMP")
         echo "  Database dump: $(du -h "$DB_DUMP" | awk '{print $1}')"
     fi

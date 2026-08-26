@@ -31,6 +31,21 @@ if ! echo "$DOMAIN" | grep -qP '^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])
     exit 1
 fi
 
+# Validate aliases (comma-separated list of valid domain names) — prevents config
+# injection into httpd_config.conf and vhconf.conf via unsanitized --aliases.
+if [[ -n "$ALIASES" ]]; then
+    IFS=',' read -ra ALIAS_LIST <<< "$ALIASES"
+    for a in "${ALIAS_LIST[@]}"; do
+        a="$(echo "$a" | tr -d '[:space:]')"
+        if ! echo "$a" | grep -qP '^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$'; then
+            echo '{"ok": false, "error": "invalid_alias", "message": "Invalid alias: '"$a"'"}' >&2
+            exit 1
+        fi
+    done
+    # Rebuild from the validated, whitespace-stripped list
+    ALIASES=$(IFS=,; echo "${ALIAS_LIST[*]}")
+fi
+
 # Validate user exists
 if ! id "$USER" &>/dev/null; then
     echo '{"ok": false, "error": "user_not_found", "message": "System user '"$USER"' does not exist"}' >&2
@@ -107,7 +122,9 @@ fi
 PHP_SHORT="${PHP_VERSION//php/}"
 LSPHP_PATH="/opt/remi/php${PHP_SHORT}/root/usr/bin/lsphp"
 if [[ ! -f "$LSPHP_PATH" ]]; then
-    LSPHP_PATH="$SERVER_ROOT/lsphp${PHP_SHORT}/bin/lsphp"
+    # LiteHttpd ships under /usr/local/lsws — $SERVER_ROOT is NOT defined in this
+    # standalone script, so use the absolute path.
+    LSPHP_PATH="/usr/local/lsws/lsphp${PHP_SHORT}/bin/lsphp"
 fi
 if ! grep -q "extprocessor lsphp${PHP_SHORT}" "$LSWS_CONF" 2>/dev/null; then
     cat >> "$LSWS_CONF" << EXTEOF

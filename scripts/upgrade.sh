@@ -119,6 +119,6 @@ if systemctl is-active llstack &>/dev/null; then
 else
     err "Upgrade may have failed. LLStack service not running."
     err "Check: journalctl -u llstack --no-pager -n 30"
-    err "Restore backup: cp -r $BACKUP_DIR-backend $LLSTACK_DIR/backend && cp -r $BACKUP_DIR-data $LLSTACK_DIR/data"
+    err "Restore backup: rm -rf $LLSTACK_DIR/backend && cp -r $BACKUP_DIR-backend/. $LLSTACK_DIR/backend/ && rm -rf $LLSTACK_DIR/data && cp -r $BACKUP_DIR-data/. $LLSTACK_DIR/data/"
     exit 1
 fi

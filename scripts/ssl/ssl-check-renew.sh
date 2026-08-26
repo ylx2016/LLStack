@@ -34,12 +34,18 @@ for cert in "$CERT_DIR"/*/fullchain.pem; do
 
     if [[ $days_left -lt $RENEW_DAYS ]]; then
         echo "  $domain: $days_left days left — renewing..."
-        if [[ -d "$ACME_HOME" ]]; then
-            "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc 2>&1 || true
-            "$ACME_HOME/acme.sh" --install-cert -d "$domain" --ecc \
-                --key-file "$CERT_DIR/$domain/privkey.pem" \
-                --fullchain-file "$CERT_DIR/$domain/fullchain.pem" 2>&1 || true
-            ((RENEWED++))
+        if [[ -d "$ACME_HOME" && -x "$ACME_HOME/acme.sh" ]]; then
+            # Count as renewed only if both renew and install-cert succeed.
+            if "$ACME_HOME/acme.sh" --renew -d "$domain" --ecc 2>&1 && \
+               "$ACME_HOME/acme.sh" --install-cert -d "$domain" --ecc \
+                    --key-file "$CERT_DIR/$domain/privkey.pem" \
+                    --fullchain-file "$CERT_DIR/$domain/fullchain.pem" 2>&1; then
+                ((RENEWED++))
+            else
+                echo "  $domain: renewal or install failed" >&2
+            fi
+        else
+            echo "  $domain: acme.sh not found at $ACME_HOME, cannot renew" >&2
         fi
     else
         echo "  $domain: $days_left days left — OK"

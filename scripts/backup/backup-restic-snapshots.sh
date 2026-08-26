@@ -19,6 +19,9 @@ done
 ARGS=(-r "$REPO" --password-file "$PW_FILE" snapshots --json)
 [[ -n "$TAG" ]] && ARGS+=(--tag "$TAG")
 
-SNAPSHOTS=$(restic "${ARGS[@]}" 2>/dev/null || echo "[]")
-
-echo "{\"ok\":true,\"data\":$SNAPSHOTS}"
+# Distinguish "no snapshots" from "restic failed" so we don't report a false success.
+if SNAPSHOTS=$(restic "${ARGS[@]}" 2>&1); then
+    echo "{\"ok\":true,\"data\":$SNAPSHOTS}"
+else
+    echo '{"ok":false,"error":"restic_failed","message":"'"$SNAPSHOTS"'"}' >&2; exit 1
+fi

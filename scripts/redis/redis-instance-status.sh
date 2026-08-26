@@ -21,7 +21,18 @@ if [[ -z "$USER" ]]; then
     exit 1
 fi
 
-SOCKET="/home/$USER/.redis/redis.sock"
+# Validate the user exists and is a plain username, and resolve the real home dir
+# (the systemd unit uses %h, so this must match the user's actual home).
+if ! id "$USER" &>/dev/null || ! [[ "$USER" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    echo '{"ok": false, "error": "invalid_user"}' >&2
+    exit 1
+fi
+if [[ "$USER" == "root" ]]; then
+    HOME_DIR="/var/lib/llstack"
+else
+    HOME_DIR=$(getent passwd "$USER" | cut -d: -f6)
+fi
+SOCKET="$HOME_DIR/.redis/redis.sock"
 SERVICE="redis@$USER"
 
 # Check if running

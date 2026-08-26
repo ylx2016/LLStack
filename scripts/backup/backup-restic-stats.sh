@@ -15,5 +15,8 @@ done
 
 [[ -z "$REPO" || -z "$PW_FILE" ]] && { echo '{"ok":false,"error":"missing_args"}' >&2; exit 1; }
 
-STATS=$(restic -r "$REPO" --password-file "$PW_FILE" stats --json 2>/dev/null || echo "{}")
-echo "{\"ok\":true,\"data\":$STATS}"
+if STATS=$(restic -r "$REPO" --password-file "$PW_FILE" stats --json 2>&1); then
+    echo "{\"ok\":true,\"data\":$STATS}"
+else
+    echo '{"ok":false,"error":"restic_failed","message":"'"$STATS"'"}' >&2; exit 1
+fi

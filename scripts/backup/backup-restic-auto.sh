@@ -84,9 +84,12 @@ KEEP_DAILY=$(sqlite3 "$DB_PATH" "SELECT json_extract(value, '$.retention.keep_da
 [[ -z "$KEEP_DAILY" ]] && KEEP_DAILY=30
 
 echo "[$(date)] Applying retention: keep-last=$KEEP_LAST, keep-daily=$KEEP_DAILY"
-"$SCRIPTS_DIR/backup/backup-restic-forget.sh" \
+if ! "$SCRIPTS_DIR/backup/backup-restic-forget.sh" \
     --repo "$REPO" --password-file "$PW_FILE" \
     --keep-last "$KEEP_LAST" --keep-daily "$KEEP_DAILY" \
-    >/dev/null 2>&1 || true
+    >/dev/null 2>&1; then
+    echo "[$(date)]   WARNING: restic retention (forget/prune) failed" >&2
+    ERRORS=$((ERRORS + 1))
+fi
 
 echo "[$(date)] Backup complete: $BACKED_UP succeeded, $ERRORS failed"

@@ -20,6 +20,12 @@ if [[ -z "$USER" || -z "$ACTION" ]]; then
     exit 1
 fi
 
+# Validate the user exists and is a plain username (prevent service-name/path injection)
+if ! id "$USER" &>/dev/null || ! [[ "$USER" =~ ^[a-zA-Z0-9_.-]+$ ]]; then
+    echo '{"ok": false, "error": "invalid_user"}' >&2
+    exit 1
+fi
+
 if [[ "$ACTION" != "start" && "$ACTION" != "stop" && "$ACTION" != "restart" ]]; then
     echo '{"ok": false, "error": "invalid_action"}' >&2
     exit 1

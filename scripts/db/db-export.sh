@@ -38,14 +38,18 @@ case "$ENGINE" in
         if [[ "$SCHEMA_ONLY" == true ]]; then
             DUMP_ARGS+=(--no-data)
         fi
-        mysqldump "${DUMP_ARGS[@]}" "$NAME" 2>/dev/null | gzip > "$OUTPUT"
+        if ! mysqldump "${DUMP_ARGS[@]}" "$NAME" 2>/dev/null | gzip > "$OUTPUT"; then
+            rm -f "$OUTPUT"; echo '{"ok":false,"error":"dump_failed","message":"Database dump failed"}' >&2; exit 1
+        fi
         ;;
     postgresql)
         PG_ARGS=()
         if [[ "$SCHEMA_ONLY" == true ]]; then
             PG_ARGS+=(--schema-only)
         fi
-        sudo -u postgres pg_dump "${PG_ARGS[@]}" "$NAME" 2>/dev/null | gzip > "$OUTPUT"
+        if ! sudo -u postgres pg_dump "${PG_ARGS[@]}" "$NAME" 2>/dev/null | gzip > "$OUTPUT"; then
+            rm -f "$OUTPUT"; echo '{"ok":false,"error":"dump_failed","message":"Database dump failed"}' >&2; exit 1
+        fi
         ;;
     *) rm -f "$OUTPUT"; echo '{"ok":false,"error":"unsupported_engine"}' >&2; exit 1 ;;
 esac

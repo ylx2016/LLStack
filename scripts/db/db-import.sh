@@ -26,16 +26,24 @@ fi
 case "$ENGINE" in
     mariadb|mysql)
         if [[ "$FILE" == *.gz ]]; then
-            gunzip -c "$FILE" | mysql "$NAME" 2>/dev/null
+            if ! gunzip -c "$FILE" | mysql "$NAME" 2>&1; then
+                echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
+            fi
         else
-            mysql "$NAME" < "$FILE" 2>/dev/null
+            if ! mysql "$NAME" < "$FILE" 2>&1; then
+                echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
+            fi
         fi
         ;;
     postgresql)
         if [[ "$FILE" == *.gz ]]; then
-            gunzip -c "$FILE" | sudo -u postgres psql "$NAME" 2>/dev/null
+            if ! gunzip -c "$FILE" | sudo -u postgres psql "$NAME" 2>&1; then
+                echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
+            fi
         else
-            sudo -u postgres psql "$NAME" < "$FILE" 2>/dev/null
+            if ! sudo -u postgres psql "$NAME" < "$FILE" 2>&1; then
+                echo '{"ok":false,"error":"import_failed","message":"Database import failed"}' >&2; exit 1
+            fi
         fi
         ;;
     *) echo '{"ok":false,"error":"unsupported_engine"}' >&2; exit 1 ;;

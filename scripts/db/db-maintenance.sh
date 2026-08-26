@@ -80,7 +80,9 @@ case "$ENGINE" in
             TABLE_COUNT=0
             ERRORS=0
 
-            echo "$TABLES" | while IFS= read -r table; do
+            # Use a here-string (not a pipe) so the loop runs in the current shell
+            # and the TABLE_COUNT/ERRORS counters persist to the final output.
+            while IFS= read -r table <<< "$TABLES"; do
                 [[ -z "$table" ]] && continue
                 safe_table="${table//\`/\`\`}"
                 echo ">>> $SQL_ACTION TABLE \`$NAME\`.\`$safe_table\`"

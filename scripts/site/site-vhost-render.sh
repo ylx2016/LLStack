@@ -75,6 +75,20 @@ ssl_cert = sys.argv[8]
 with open(template_path) as f:
     tpl = f.read()
 
+# Validate aliases (comma-separated list of valid domain names) to prevent
+# config injection into vhconf.conf via unsanitized aliases.
+import re as _re
+_DOMAIN_RE = _re.compile(r'^(?:[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$')
+def _valid_domain(d): return bool(_DOMAIN_RE.match(d))
+
+if aliases:
+    _parts = [x.strip() for x in aliases.split(',') if x.strip()]
+    for _a in _parts:
+        if not _valid_domain(_a):
+            print(json.dumps({"ok": False, "error": "invalid_alias", "message": "Invalid alias: " + _a}), file=sys.stderr)
+            sys.exit(1)
+    aliases = ",".join(_parts)
+
 # Build alias config line
 alias_conf = f"vhAliases                 {aliases}" if aliases else ""
 

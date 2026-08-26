@@ -2,6 +2,7 @@
 
 import argparse
 import urllib.request
+import urllib.parse
 import json
 import hashlib
 import getpass
@@ -561,7 +562,8 @@ def cmd_backup_create(base_url, args):
 
 
 def cmd_logs(base_url, args):
-    path = "/api/logs/%s?lines=%d" % (args.log_id, int(args.lines))
+    # URL-encode log_id so a value containing /, ?, #, or .. cannot alter the request path/query.
+    path = "/api/logs/%s?lines=%d" % (urllib.parse.quote(str(args.log_id), safe=""), int(args.lines))
     result = authed_request(base_url, path)
     lines = result.get("lines") or []
     print("Log: %s" % (result.get("display") or args.log_id))
