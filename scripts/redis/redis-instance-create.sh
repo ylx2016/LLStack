@@ -195,6 +195,20 @@ else
     STATUS="failed"
 fi
 
-cat << EOF
-{"ok": true, "data": {"user": "$USER", "socket_path": "$REDIS_SOCK", "maxmemory_mb": $MAXMEMORY, "status": "$STATUS"}}
-EOF
+# Use Python for JSON serialization. $USER is validated to a username
+# regex and $REDIS_SOCK/$STATUS are system-controlled, but json.dumps
+# is still the right tool — the JSON contract says "one parseable doc",
+# and this guarantees it.
+python3 - "$USER" "$REDIS_SOCK" "$MAXMEMORY" "$STATUS" <<'PYEOF'
+import json, sys
+user, sock, maxmem, status = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "user": user,
+        "socket_path": sock,
+        "maxmemory_mb": maxmem,
+        "status": status,
+    },
+}, separators=(",", ":")))
+PYEOF

@@ -95,6 +95,18 @@ SITE_USER=$(stat -c '%U' "$(dirname "$PATH_ARG")" 2>/dev/null || echo "root")
 chown -R "$SITE_USER:$SITE_USER" "$PATH_ARG" 2>/dev/null || true
 
 echo ">>> WordPress installed successfully!" >&2
-cat << EOF
-{"ok":true,"data":{"path":"$PATH_ARG","url":"$URL","version":"$VERSION","admin_user":"$ADMIN_USER"}}
-EOF
+# Use Python for JSON serialization — $PATH_ARG, $URL, $VERSION, $ADMIN_USER
+# are all user-controlled and could contain " or \.
+python3 - "$PATH_ARG" "$URL" "$VERSION" "$ADMIN_USER" <<'PYEOF'
+import json, sys
+path, url, version, admin_user = sys.argv[1:5]
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "path": path,
+        "url": url,
+        "version": version,
+        "admin_user": admin_user,
+    },
+}, separators=(",", ":")))
+PYEOF
