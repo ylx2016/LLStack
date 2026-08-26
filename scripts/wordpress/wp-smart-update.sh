@@ -177,14 +177,25 @@ if [[ ${#ERRORS[@]} -gt 0 ]]; then
 fi
 
 echo ">>> Smart Update check complete." >&2
-cat << EOF
-{"ok":true,"data":{
-  "update_type":"$UPDATE_TYPE",
-  "slug":"${SLUG:-core}",
-  "pre_version":"$PRE_VERSION",
-  "post_version":"$POST_VERSION",
-  "update_exit_code":$UPDATE_EXIT,
-  "errors":$ERROR_JSON,
-  "safe_to_apply":$([ ${#ERRORS[@]} -eq 0 ] && [ "$UPDATE_EXIT" -eq 0 ] && echo "true" || echo "false")
-}}
-EOF
+# Use Python for JSON serialization so user-supplied values (slug, version
+# strings, update type) cannot break the contract the backend parses the
+# whole of stdout for.
+python3 - "$UPDATE_TYPE" "${SLUG:-core}" "$PRE_VERSION" "$POST_VERSION" \
+        "$UPDATE_EXIT" "$ERROR_JSON" <<'PYEOF'
+import json, sys
+update_type, slug, pre_ver, post_ver, update_exit, error_json = sys.argv[1:7]
+errors = json.loads(error_json)
+safe = len(errors) == 0 and int(update_exit) == 0
+print(json.dumps({
+    "ok": True,
+    "data": {
+        "update_type": update_type,
+        "slug": slug,
+        "pre_version": pre_ver,
+        "post_version": post_ver,
+        "update_exit_code": int(update_exit),
+        "errors": errors,
+        "safe_to_apply": safe,
+    },
+}, separators=(",", ":")))
+PYEOF
