@@ -75,7 +75,13 @@ if [[ ! -f "$CNF" ]]; then
             echo '{"ok":false,"error":"root_password_unknown","message":"No temporary password in /var/log/mysqld.log and root is not reachable; set /root/.my.cnf manually"}' >&2
             exit 1
         fi
-        mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${NEW_PASS}';" 2>/dev/null || true
+        # Earlier version had `|| true` here, which on a unix_socket-auth setup
+        # would silently leave root with no password while writing one to
+        # /root/.my.cnf — every later `mysql` call would then fail.
+        if ! mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${NEW_PASS}';" &>/dev/null; then
+            echo '{"ok":false,"error":"root_reset_failed","message":"ALTER USER failed; not writing .my.cnf with a password root does not have"}' >&2
+            exit 1
+        fi
     fi
 
     umask 077
@@ -88,7 +94,19 @@ CNFEOF
     echo ">>> Root credentials written to $CNF" >&2
 fi
 
-INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+# Verify the live server's version actually matches what was requested
+INSTALLED_VER=""
+if mysql -uroot -e "SELECT VERSION();" &>/dev/null; then
+    INSTALLED_VER=$(mysql -uroot -N -B -e "SELECT VERSION();" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+' | head -1)
+fi
+if [[ -z "$INSTALLED_VER" ]]; then
+    echo '{"ok":false,"error":"version_check_failed","message":"Could not determine installed Percona version"}' >&2
+    exit 1
+fi
+if [[ "$INSTALLED_VER" != "$VERSION" ]]; then
+    echo "{\"ok\":false,\"error\":\"version_mismatch\",\"data\":{\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED_VER\"}}" >&2
+    exit 1
+fi
 
 echo ">>> Percona Server $VERSION installed successfully" >&2
 printf '{"ok":true,"data":{"engine":"percona","requested":"%s","installed":"%s","credentials":"%s"}}\n' \

@@ -103,8 +103,10 @@ if [[ "$USE_DEV" == true ]]; then
     SRC="/opt/llstack-panel"
 else
     SRC=$(mktemp -d)
-    # shellcheck disable=SC2064
-    trap "rm -rf '$SRC'" EXIT
+    # The trap must use single-quotes around the whole body so $SRC is expanded
+    # at trap-FIRE time, not at trap-SET time. With double quotes, the literal
+    # string `rm -rf '$SRC'` was stored and the tmp dir leaked on every upgrade.
+    trap 'rm -rf "$SRC"' EXIT
     if [[ -n "$TARGET_VERSION" ]]; then
         git clone --depth 1 --branch "$TARGET_VERSION" "$LLSTACK_REPO" "$SRC" 2>&1 | tail -1
     else

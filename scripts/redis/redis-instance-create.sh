@@ -36,13 +36,18 @@ if [[ -z "$USER" || -z "$PASSWORD" ]]; then
 fi
 
 # Reject passwords with control characters (prevent redis.conf injection)
-if [[ "$PASSWORD" =~ $'\n' ]] || printf '%s' "$PASSWORD" | LC_ALL=C grep -q '[[:cntrl:]]'; then
+# \t (0x09) is included by [[:cntrl:]] in LC_ALL=C and rejected; backslash (0x5c)
+# is NOT, so a password like "foo\nbar" (4 chars f,o,o,\,n,b,a,r) would slip
+# through and break the requirepass line on the next sed pass. Reject it too.
+if [[ "$PASSWORD" =~ $'\n\t' ]] || printf '%s' "$PASSWORD" | LC_ALL=C grep -qE '[[:cntrl:]]|\\'; then
     echo '{"ok": false, "error": "invalid_password_chars"}' >&2; exit 1
 fi
 
-# Validate maxmemory is a positive integer (prevents config injection via maxmemory line)
-if ! [[ "$MAXMEMORY" =~ ^[0-9]+$ ]]; then
-    echo '{"ok": false, "error": "invalid_maxmemory"}' >&2; exit 1
+# Validate maxmemory: positive integer AND within a sane ceiling so a typo
+# (`--maxmemory 999999999999`) doesn't make Redis demand 1TB of RAM and OOM-kill
+# the box on startup. 64GB covers the largest planned deployments.
+if ! [[ "$MAXMEMORY" =~ ^[0-9]+$ ]] || [[ "$MAXMEMORY" -lt 1 || "$MAXMEMORY" -gt 65536 ]]; then
+    echo '{"ok": false, "error": "invalid_maxmemory", "message": "--maxmemory must be 1..65536 (MB)"}' >&2; exit 1
 fi
 
 if ! id "$USER" &>/dev/null; then
@@ -72,8 +77,18 @@ mkdir -p "$REDIS_DIR"
 chown "$USER:$USER" "$REDIS_DIR"
 chmod 700 "$REDIS_DIR"
 
-# 2. Generate redis.conf (escape password for config file)
-ESCAPED_PW=$(printf '%s' "$PASSWORD" | sed -e 's/[\"\\]/\\&/g')
+# 2. Generate redis.conf (escape password for config file).
+# Escape every char that redis.conf cares about: backslash, double quote, and
+# every non-printable byte. The previous version only escaped \" and \\, which
+# meant a password containing anything else (e.g. \n in the two-byte form
+# \ + n, or other shell-special chars) would silently break auth at runtime.
+ESCAPED_PW=$(printf '%s' "$PASSWORD" | python3 -c '
+import sys
+s = sys.stdin.read()
+# redis.conf string tokens: backslash-escape the few characters redis treats
+# specially. The result is wrapped in double quotes below.
+print(s.replace("\\", "\\\\").replace("\"", "\\\""), end="")
+')
 
 cat > "$REDIS_CONF" << CONFEOF
 # LLStack managed Redis instance for $USER
@@ -137,7 +152,10 @@ User=${USER}
 Group=${USER}
 EnvironmentFile=-${REDIS_DIR}/env
 ExecStart=${REDIS_SERVER_BIN} ${REDIS_DIR}/redis.conf
-ExecStop=/bin/bash -c 'REDISCLI_AUTH="\$REDIS_PASSWORD" ${REDIS_CLI_BIN} -s ${REDIS_DIR}/redis.sock shutdown nosave'
+# Pass the password via the EnvironmentFile. Earlier versions interpolated
+# REDIS_PASSWORD into a bash -c "..." string, which double-expanded $ and
+# broke passwords containing $, ", or \ — shutdown then hung.
+ExecStop=${REDIS_CLI_BIN} -s ${REDIS_DIR}/redis.sock -a \$\{REDIS_PASSWORD\} shutdown nosave
 Restart=always
 RestartSec=5
 LimitNOFILE=10032
@@ -148,9 +166,12 @@ WantedBy=multi-user.target
 SVCEOF
 systemctl daemon-reload
 
-# 3b. Create env file for systemd (password not visible in unit or /proc)
+# 3b. Create env file for systemd (password not visible in unit or /proc).
+# systemd's EnvironmentFile format treats lines starting with # as comments
+# and $ as variable references, so a password containing either would silently
+# be truncated or empty. Quoting the value preserves it.
 ENV_FILE="$REDIS_DIR/env"
-printf 'REDIS_PASSWORD=%s\n' "$PASSWORD" > "$ENV_FILE"
+printf 'REDIS_PASSWORD="%s"\n' "$PASSWORD" > "$ENV_FILE"
 chown "$USER:$USER" "$ENV_FILE"
 chmod 600 "$ENV_FILE"
 

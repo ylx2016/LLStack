@@ -86,8 +86,20 @@ rollback() {
     if [[ -f "$SNAP/vhosts.tar.gz" ]]; then
         tar xzf "$SNAP/vhosts.tar.gz" -C /usr/local/lsws/conf 2>/dev/null || true
     fi
+    # PHP ini files were snapshotted as $SNAP/php<ver>.ini.bak at the time
+    # they were overwritten (see "── 6. PHP configs ──" below). Without
+    # restoring them here, a bad php.ini that takes the web server's PHP
+    # down stays in place even after the user sees "rolled back".
+    for bak in "$SNAP"/php*.ini.bak; do
+        [[ -f "$bak" ]] || continue
+        ver=$(basename "$bak" .ini.bak | sed 's/^php//')
+        if [[ "$ver" =~ ^[0-9]+$ ]] && [[ -f /etc/opt/remi/php${ver}/php.ini ]]; then
+            cp "$bak" "/etc/opt/remi/php${ver}/php.ini"
+        fi
+    done
     /usr/local/lsws/bin/lswsctrl restart &>/dev/null || true
     systemctl start llstack 2>/dev/null || true
+    command -v restorecon &>/dev/null && restorecon -R /usr/local/lsws/conf "$LLSTACK_DIR/data" 2>/dev/null || true
 }
 trap 'rm -rf "$TMPDIR"' EXIT
 

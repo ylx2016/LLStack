@@ -106,7 +106,14 @@ if [[ ! -f "$CNF" ]]; then
             echo '{"ok":false,"error":"root_password_unknown","message":"No temporary password in /var/log/mysqld.log and root is not reachable; set /root/.my.cnf manually"}' >&2
             exit 1
         fi
-        mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${NEW_PASS}';" 2>/dev/null || true
+        # The earlier version had `|| true` here, which swallowed a real ALTER
+        # failure (e.g. on systems where root authenticates via unix_socket):
+        # the script would then write a NEW password to /root/.my.cnf that
+        # root does not actually have, locking out every later mysql call.
+        if ! mysql -uroot -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '${NEW_PASS}';" &>/dev/null; then
+            echo '{"ok":false,"error":"root_reset_failed","message":"ALTER USER failed; not writing .my.cnf with a password root does not have"}' >&2
+            exit 1
+        fi
     fi
 
     umask 077
@@ -119,9 +126,18 @@ CNFEOF
     echo ">>> Root credentials written to $CNF" >&2
 fi
 
-# Verify the installed major.minor actually matches what was requested
-INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
-if [[ -n "$INSTALLED_VER" && "$VERSION" == 8.* && "$INSTALLED_VER" != "$VERSION" ]]; then
+# Verify the installed major.minor actually matches what was requested.
+# The earlier version only checked 8.x branches and used `mysql --version` which
+# returns the client version (matched only because the client and server are
+# from the same package on EL); we now query the live server.
+INSTALLED_VER=""
+if mysql -uroot -e "SELECT VERSION();" &>/dev/null; then
+    INSTALLED_VER=$(mysql -uroot -N -B -e "SELECT VERSION();" 2>/dev/null | tr -d '\r' | grep -oE '^[0-9]+\.[0-9]+' | head -1)
+elif command -v mysql &>/dev/null; then
+    # Fallback: client banner — only acceptable if we cannot reach the server
+    INSTALLED_VER=$(mysql --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -1 || echo "")
+fi
+if [[ -n "$INSTALLED_VER" && "$INSTALLED_VER" != "$VERSION" ]]; then
     echo "{\"ok\":false,\"error\":\"version_mismatch\",\"data\":{\"requested\":\"$VERSION\",\"installed\":\"$INSTALLED_VER\"}}" >&2
     exit 1
 fi

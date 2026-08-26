@@ -172,6 +172,16 @@ setup_sudoers() {
 $LLSTACK_USER ALL=(root) NOPASSWD: $LLSTACK_DIR/scripts/*/*.sh
 SUDOEOF
     chmod 440 /etc/sudoers.d/llstack
+    # A single-character typo in a sudoers file disables sudo for the whole
+    # system. Validate before leaving it in place; on failure, remove the
+    # broken file and abort so the operator can fix it manually rather than
+    # being locked out.
+    if ! visudo -c -f /etc/sudoers.d/llstack >/dev/null 2>&1; then
+        rm -f /etc/sudoers.d/llstack
+        err "Generated sudoers file failed validation; removed and aborting"
+        err "  (a typo in the file would have locked out all sudo on this host)"
+        exit 1
+    fi
 }
 
 setup_service() {
@@ -264,6 +274,10 @@ setup_logrotate() {
 setup_firewall() {
     log "Configuring firewall..."
     if command -v firewall-cmd &>/dev/null; then
+        # SSH must be added explicitly: a non-default zone, or a minimal EL
+        # install, may not have the ssh service in the active zone, and the
+        # next --reload would otherwise cut the operator off mid-install.
+        firewall-cmd --permanent --add-service=ssh 2>/dev/null || true
         firewall-cmd --permanent --add-port="${LLSTACK_PORT}/tcp" 2>/dev/null || true
         firewall-cmd --permanent --add-service=http --add-service=https 2>/dev/null || true
         firewall-cmd --reload 2>/dev/null || true

@@ -218,4 +218,13 @@ fi
 chown -R "$SITE_USER:$SITE_USER" "$DOC_ROOT" 2>/dev/null || true
 
 echo ">>> $APP_NAME installation complete!" >&2
-printf '{"ok":true,"data":{"app":"%s","name":"%s","path":"%s"}}\n' "$APP_ID" "$APP_NAME" "$DOC_ROOT"
+# Use Python (already a hard dep — install.sh puts python3.12 on the box) to
+# serialize, so user-controlled values cannot break the JSON: a --doc-root or
+# manifest name containing " or \ would otherwise emit invalid JSON and break
+# the backend's json.loads on the whole of stdout.
+python3 - "$APP_ID" "$APP_NAME" "$DOC_ROOT" <<'PYEOF'
+import json, sys
+app, name, path = sys.argv[1:4]
+print(json.dumps({"ok": True, "data": {"app": app, "name": name, "path": path}},
+                 separators=(",", ":")))
+PYEOF

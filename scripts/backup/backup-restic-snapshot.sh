@@ -40,7 +40,10 @@ if [[ -n "$DB_NAME" && -n "$DB_ENGINE" ]]; then
         echo '{"ok":false,"error":"invalid_db_name"}' >&2; exit 1
     fi
 
-    DB_DUMP=$(mktemp /tmp/restic-db-XXXXXXXXXX.sql.gz)
+    # GNU mktemp requires the template to end in X (not .sql.gz), so create
+    # the temp file first and then add the suffix. mktemp -t would also work
+    # but its filename depends on $TMPDIR and is harder to reason about.
+    DB_DUMP=$(mktemp); mv "$DB_DUMP" "${DB_DUMP}.sql.gz"; DB_DUMP="${DB_DUMP}.sql.gz"
     trap "rm -f '$DB_DUMP'" EXIT
 
     echo ">>> Dumping database: $DB_NAME ($DB_ENGINE)..." >&2
