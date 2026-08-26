@@ -18,7 +18,6 @@ RED=$'\033[0;31m'; GRN=$'\033[0;32m'; YEL=$'\033[1;33m'; NC=$'\033[0m'
 SMOKE=/tmp/smoke
 SCRIPTS=/z/t/LLStack-main/scripts
 export PATH="/usr/local/bin:/tmp/smoke/bin:/usr/bin:/bin"
-
 pass() { echo "  ${GRN}PASS${NC}: $1"; PASS=$((PASS+1)); }
 fail() { echo "  ${RED}FAIL${NC}: $1 — $2"; FAIL=$((FAIL+1)); }
 
@@ -222,6 +221,85 @@ run "plugin update on stub"  s ""  "$SCRIPTS/wordpress/wp-smart-update.sh" \
 # pre/post version come up empty and update runs nothing — success with empty data
 run "unrecognized type"      s ""  "$SCRIPTS/wordpress/wp-smart-update.sh" \
     --path "$SMOKE/root/wp-update" --type widgets
+
+# ─── db scripts: contract + validation ───────────────────────────────
+echo
+echo "── db scripts: contract and validation"
+
+# db-create
+run "db-create: unknown arg"          e unknown_arg      \
+    "$SCRIPTS/db/db-create.sh" --foo bar
+run "db-create: missing args"         e missing_args     \
+    "$SCRIPTS/db/db-create.sh"
+run "db-create: invalid db name"      e invalid_db_name  \
+    "$SCRIPTS/db/db-create.sh" --engine mariadb --name '1bad; drop'
+run "db-create: unsupported engine"   e unsupported_engine \
+    "$SCRIPTS/db/db-create.sh" --engine sqlite --name wp_db
+run "db-create: success (mariadb)"    s ""               \
+    "$SCRIPTS/db/db-create.sh" --engine mariadb --name wp_db --db-user wp_user \
+    --password-file /etc/hostname
+
+# db-delete
+run "db-delete: unknown arg"          e unknown_arg      \
+    "$SCRIPTS/db/db-delete.sh" --foo
+run "db-delete: missing args"         e missing_args     \
+    "$SCRIPTS/db/db-delete.sh"
+run "db-delete: unsupported engine"   e unsupported_engine \
+    "$SCRIPTS/db/db-delete.sh" --engine sqlite --name wp_db
+run "db-delete: invalid db name"      e invalid_db_name  \
+    "$SCRIPTS/db/db-delete.sh" --engine mariadb --name 'bad;name'
+run "db-delete: success (mariadb)"    s ""               \
+    "$SCRIPTS/db/db-delete.sh" --engine mariadb --name wp_db
+
+# db-clone
+run "db-clone: unknown arg"           e unknown_arg      \
+    "$SCRIPTS/db/db-clone.sh" --foo
+run "db-clone: missing args"          e missing_args     \
+    "$SCRIPTS/db/db-clone.sh"
+run "db-clone: source not found"      e source_db_not_found \
+    "$SCRIPTS/db/db-clone.sh" --engine mariadb --source no_such --target dest_db
+run "db-clone: source==target"        e source_equals_target \
+    "$SCRIPTS/db/db-clone.sh" --engine mariadb --source wp_db --target wp_db
+run "db-clone: success"               s ""               \
+    "$SCRIPTS/db/db-clone.sh" --engine mariadb --source wp_db --target wp_clone
+
+# db-export — has mktemp template fix; JSON includes schema_only as bool
+run "db-export: unsupported engine"   e unsupported_engine \
+    "$SCRIPTS/db/db-export.sh" --engine sqlite --name wp_db
+run "db-export: invalid db name"      e invalid_db_name  \
+    "$SCRIPTS/db/db-export.sh" --engine mariadb --name 'bad;name'
+# success path: write a real .sql file the fake mysql+gzip pipeline can read
+echo "SELECT 1;" > "$SMOKE/data/seed.sql"
+run "db-export: success"              s ""               \
+    "$SCRIPTS/db/db-export.sh" --engine mariadb --name wp_db
+
+# db-import
+echo "fake" > "$SMOKE/data/import.sql"
+run "db-import: file not found"       e file_not_found   \
+    "$SCRIPTS/db/db-import.sh" --engine mariadb --name wp_db --file /nonexistent.sql
+run "db-import: unsupported engine"   e unsupported_engine \
+    "$SCRIPTS/db/db-import.sh" --engine sqlite --name wp_db --file "$SMOKE/data/import.sql"
+run "db-import: success"              s ""               \
+    "$SCRIPTS/db/db-import.sh" --engine mariadb --name wp_db --file "$SMOKE/data/import.sql"
+gzip -c "$SMOKE/data/import.sql" > "$SMOKE/data/import.sql.gz"
+run "db-import: gzipped success"      s ""               \
+    "$SCRIPTS/db/db-import.sh" --engine mariadb --name wp_db --file "$SMOKE/data/import.sql.gz"
+
+# db-user-create
+PW=$(mktemp); printf 'p@ss\n' > "$PW"
+run "db-user-create: pw file missing" e password_file_not_found \
+    "$SCRIPTS/db/db-user-create.sh" --engine mariadb --db-name wp_db --db-user wp_user \
+    --password-file /nonexistent
+# Control-char password via real file (process substitution doesn't work
+# reliably under Git Bash on Windows)
+PW_BAD=$(mktemp); printf 'bad\npw' > "$PW_BAD"
+run "db-user-create: control char pw" e invalid_password_chars \
+    "$SCRIPTS/db/db-user-create.sh" --engine mariadb --db-name wp_db --db-user wp_user \
+    --password-file "$PW_BAD"
+run "db-user-create: success"         s ""               \
+    "$SCRIPTS/db/db-user-create.sh" --engine mariadb --db-name wp_db --db-user wp_user \
+    --password-file "$PW"
+rm -f "$PW" "$PW_BAD"
 
 # ─── Summary ─────────────────────────────────────────────────────────
 echo
